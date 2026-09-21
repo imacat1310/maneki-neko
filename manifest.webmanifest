@@ -1,0 +1,16 @@
+{
+  "name": "Maneki Mit · Personal Finance",
+  "short_name": "Maneki Mit",
+  "description": "A lucky-cat personal finance app starring Mit.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#FFF8EB",
+  "theme_color": "#F2B632",
+  "icons": [
+    { "src": "ava/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "ava/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "ava/app-icon-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

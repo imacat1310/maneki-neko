@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mit · Avatar Gallery</title>
+  <style>
+    body { margin: 0; padding: 24px 16px; font-family: system-ui, -apple-system, sans-serif; background: #FFF8EB; color: #2F2724; }
+    h1 { margin: 0 0 4px; }
+    p { color: #8A7F78; margin: 0 0 20px; }
+    h2 { font-size: 14px; text-transform: uppercase; letter-spacing: 1px; color: #8A7F78; margin: 28px 0 10px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+    figure { margin: 0; background: #fff; border-radius: 16px; padding: 10px; text-align: center; box-shadow: 0 2px 10px rgba(80, 50, 20, 0.07); }
+    figure img { width: 100%; aspect-ratio: 1; object-fit: contain; }
+    figcaption { font-size: 13px; font-weight: 700; }
+    a { color: #9A6412; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <h1>Mit's realistic avatars</h1>
+  <p>Rendered live from <code>js/avatar.js</code>. Click a link to download the PNG.</p>
+  <h2>Icons</h2><div class="grid" id="icons"></div>
+  <h2>Portraits</h2><div class="grid" id="portraits"></div>
+  <h2>Full-body stickers</h2><div class="grid" id="stickers"></div>
+
+  <script src="../js/neko.js"></script>
+  <script src="../js/mit-real.js"></script>
+  <script src="../js/avatar.js"></script>
+  <script>
+    const mit = {
+      id: 'mit', name: 'Mit', builtin: true, species: 'cat', cutout: MIT_REAL.cutout, face: MIT_REAL.face, collarOn: true,
+      colors: { collar: '#D7263D' }, ui: { primary: '#F2B632', primarySoft: '#FFEFC4', primaryDark: '#9A6412' },
+    };
+    const card = (host, url, label, file) => {
+      host.insertAdjacentHTML('beforeend', `<figure><img src="${url}" alt="${label}"><figcaption>${label}</figcaption><a href="${url}" download="${file}">${file}</a></figure>`);
+    };
+    Avatar.prepare(mit).then(() => {
+      card(icons, Avatar.get(mit, 'normal', 'icon'), 'App icon', 'app-icon-real.png');
+      card(icons, Avatar.get(mit, 'normal', 'favicon'), 'Favicon', 'favicon-real.png');
+      for (const s of Object.keys(Avatar.STATES)) {
+        const label = `${Avatar.emojiFor(mit, s)} ${Avatar.STATES[s].label}`;
+        card(portraits, Avatar.get(mit, s, 'portrait'), label, `mit-avatar-real-${s}.png`);
+        card(stickers, Avatar.get(mit, s, 'sticker'), label, `mit-real-${s}.png`);
+      }
+    });
+  </script>
+</body>
+</html>

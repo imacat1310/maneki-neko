@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-24 -30 48 60" width="96" height="96" role="img" aria-label="Koban coin"><defs>
+      <radialGradient id="nkifgz7-fur" gradientUnits="userSpaceOnUse" cx="96" cy="70" r="120">
+        <stop offset="0" stop-color="#b7b4b2"/><stop offset=".55" stop-color="#A9A6A3"/><stop offset="1" stop-color="#878582"/>
+      </radialGradient>
+      <radialGradient id="nkifgz7-eye" cx=".45" cy=".4" r=".7">
+        <stop offset="0" stop-color="#dcd78a"/><stop offset=".6" stop-color="#C9C24B"/><stop offset="1" stop-color="#8d8835"/>
+      </radialGradient>
+      <linearGradient id="nkifgz7-gold" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#f9dd9d"/><stop offset=".5" stop-color="#F4C24D"/><stop offset="1" stop-color="#b7923a"/>
+      </linearGradient>
+    </defs><g transform="translate(0 0) scale(1)">
+      <ellipse cx="0" cy="0" rx="19" ry="27" fill="url(#nkifgz7-gold)" stroke="#866b2a" stroke-width="2.4"/>
+      <ellipse cx="0" cy="0" rx="14" ry="21.5" fill="none" stroke="#866b2a" stroke-width="1.2" opacity=".6"/>
+      <text x="0" y="-3" text-anchor="middle" font-size="12" font-weight="700" fill="#866b2a" font-family="'Hiragino Mincho ProN','Yu Mincho','Noto Serif JP',serif">千</text>
+      <text x="0" y="13" text-anchor="middle" font-size="12" font-weight="700" fill="#866b2a" font-family="'Hiragino Mincho ProN','Yu Mincho','Noto Serif JP',serif">両</text>
+      <path d="M-11,-16 Q-14,-4 -11,10" stroke="#fff" stroke-width="2.4" fill="none" stroke-linecap="round" opacity=".55"/>
+    </g></svg>

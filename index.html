@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#F2B632">
+  <meta name="description" content="Maneki-Neko: a lucky-cat personal finance app starring Mit.">
+  <title>Maneki Mit · Personal Finance</title>
+  <link id="favicon" rel="icon" href="ava/favicon-real.png">
+  <link rel="apple-touch-icon" href="ava/apple-touch-icon.png">
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Maneki Mit">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div id="side-mascot" aria-hidden="true"></div>
+
+  <div id="app">
+    <header id="topbar"></header>
+    <main id="view" aria-live="polite"></main>
+
+    <nav id="tabbar" aria-label="Main">
+      <button data-view="tx" class="active">
+        <svg viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3.5" y="5" width="17" height="14" rx="3"/><path d="M3.5 9.5h17M7 14h4"/></g></svg>
+        Transactions
+      </button>
+      <button data-view="report">
+        <svg viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3.5a8.5 8.5 0 1 0 8.5 8.5H12z"/><path d="M15 3.8A8.5 8.5 0 0 1 20.2 9H15z"/></g></svg>
+        Report
+      </button>
+      <button class="fab" data-action="add" aria-label="Add transaction">
+        <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>
+      </button>
+      <button data-view="budget">
+        <svg viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><ellipse cx="12" cy="12" rx="6.5" ry="8.5"/><ellipse cx="12" cy="12" rx="3.8" ry="5.6" opacity=".6"/></g></svg>
+        Budgets
+      </button>
+      <button data-view="account">
+        <svg viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M5 20c0-4 3-6.5 7-6.5s7 2.5 7 6.5"/><path d="M7.5 5.5L8.5 2.8 10.6 5a6 6 0 0 1 2.8 0l2.1-2.2 1 2.7A4.8 4.8 0 1 1 7.5 5.5z" transform="translate(0 2)"/></g></svg>
+        Account
+      </button>
+    </nav>
+  </div>
+
+  <div id="sheets"></div>
+  <div id="toast" role="status" aria-live="polite"></div>
+
+  <script src="js/neko.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/charts.js"></script>
+  <script src="js/mit-real.js"></script>
+  <script src="js/avatar.js"></script>
+  <script src="js/petstudio.js"></script>
+  <script src="js/app.js"></script>
+  <script>
+    // offline support when served over http(s) (not needed when opened from disk)
+    if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js');
+  </script>
+</body>
+</html>
