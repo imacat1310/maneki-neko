@@ -1,5 +1,5 @@
 /* Offline support: cache the app shell, and CDN assets (fonts, AI detector) once they've been used. */
-const VERSION = 'maneki-v1';
+const VERSION = 'maneki-v2';
 const SHELL = [
   './', './index.html', './manifest.webmanifest', './css/style.css',
   './js/neko.js', './js/store.js', './js/charts.js', './js/mit-real.js', './js/avatar.js', './js/petstudio.js', './js/app.js',

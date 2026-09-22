@@ -17,8 +17,8 @@
     },
     ui: { primary: '#F2B632', primaryDark: '#9A6412', primarySoft: '#FFEFC4', onPrimary: '#3A2A1E', bg: '#FFF8EB', accent: '#D7263D' },
     photo: 'ava/mit-sticker.jpg',
-    cutout: window.MIT_REAL ? window.MIT_REAL.cutout : null,
-    face: window.MIT_REAL ? window.MIT_REAL.face : null,
+    templates: window.MIT_REAL ? [{ id: 'mit-1', cutout: window.MIT_REAL.cutout, face: window.MIT_REAL.face }] : [],
+    mainId: 'mit-1',
     collarOn: true,
   };
 
@@ -832,8 +832,23 @@
   }
 
   /* ================= Pet Studio ================= */
+  const MAX_PHOTOS = 6;
+
+  // Themes made before multi-photo templates keep working.
+  function normalizeTheme(t) {
+    const c = JSON.parse(JSON.stringify(t));
+    if (!c.templates || !c.templates.length) {
+      const src = c.cutout || c.sticker;
+      c.templates = src ? [{ id: 'main', cutout: src, face: c.face || null, photo: null, pal: null }] : [];
+      c.mainId = 'main';
+      if (c.colorsTouched === undefined) c.colorsTouched = true; // keep the colours read from the original photo
+    }
+    delete c.cutout; delete c.sticker; delete c.face;
+    c.moodMap = c.moodMap || {};
+    return c;
+  }
+
   function petStudio(existing) {
-    const draft = existing ? JSON.parse(JSON.stringify(existing)) : null;
     openSheet(`<div class="studio">
       ${sheetHeader(existing ? 'Edit ' + existing.name : 'Pet Studio', '')}
       <div class="studio-body"></div>
@@ -841,7 +856,7 @@
       className: 'full',
       onMount(sheet, close) {
         const body = $('.studio-body', sheet);
-        if (draft) return editorStage(body, draft, close, true);
+        if (existing) return editorStage(body, normalizeTheme(existing), close, true);
         introStage(body, close);
       },
     });
@@ -852,77 +867,438 @@
       <div class="studio-intro">
         <div class="studio-hero">${mascot({ pose: 'maneki', mood: 'happy', className: 'waving' }, MIT_THEME)}</div>
         <h2>Turn your pet into a lucky cat!</h2>
-        <p class="muted">Upload a clear photo of your pet (or any character). I'll find it, cut it out, read its fur, stripes and eye colours, and redesign the app around it, just like I was made from Mit's photo.</p>
+        <p class="muted">Add one or more photos of your pet (or any character). I'll find it, cut it out, find its eyes and read its colours, then redesign the app around it. More photos, in different poses, give better moods.</p>
         <label class="drop" tabindex="0">
-          <input type="file" accept="image/*" hidden>
+          <input type="file" accept="image/*" multiple hidden>
           <span class="drop-ic">📷</span>
-          <b>Choose a photo</b><small>or drop it here</small>
+          <b>Choose photos</b><small>up to ${MAX_PHOTOS} · or drop them here</small>
         </label>
-        <p class="muted small">Uses an AI object detector (TensorFlow.js COCO-SSD) when you're online, with an offline fallback. Your photo never leaves this device.</p>
+        <label class="toggle center"><input type="checkbox" data-hl> ✏️ Let me highlight my pet in each photo</label>
+        <p class="muted small">Uses AI (COCO-SSD detector + MediaPipe segmenter) when you're online, with an offline fallback. Your photos never leave this device.</p>
       </div>`;
     const drop = $('.drop', body);
-    const input = $('input', body);
-    input.onchange = () => input.files[0] && run(input.files[0]);
+    const input = $('input[type=file]', body);
+    const draft = {
+      id: 'pet_' + S.uid(), name: 'Neko', species: 'cat', ears: 'pointy', pattern: 'tabby',
+      colors: Object.assign({}, MIT_THEME.colors), ui: Object.assign({}, MIT_THEME.ui),
+      templates: [], mainId: null, moodMap: {}, collarOn: true, swatches: [],
+    };
+    const start = (files) => {
+      files = Array.from(files).filter((f) => f.type.startsWith('image/')).slice(0, MAX_PHOTOS);
+      if (!files.length) return;
+      addPhotos(body, draft, files, $('[data-hl]', body).checked).then((n) => {
+        if (n) editorStage(body, draft, close, false);
+        else introStage(body, close);
+      });
+    };
+    input.onchange = () => start(input.files);
     drop.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); input.click(); } };
     drop.ondragover = (e) => { e.preventDefault(); drop.classList.add('over'); };
     drop.ondragleave = () => drop.classList.remove('over');
-    drop.ondrop = (e) => {
-      e.preventDefault();
-      drop.classList.remove('over');
-      const f = e.dataTransfer.files[0];
-      if (f && f.type.startsWith('image/')) run(f);
-    };
-
-    async function run(file) {
-      const url = URL.createObjectURL(file);
-      body.innerHTML = `<div class="studio-scan">
-          <div class="scan-img"><img src="${url}" alt="Your photo"><i class="scan-line"></i></div>
-          <ol class="steps"></ol>
-        </div>`;
-      const steps = $('.steps', body);
-      let lastKey = null;
-      const onStep = (key, text) => {
-        if (key === lastKey && steps.lastElementChild) { steps.lastElementChild.textContent = text; return; }
-        if (steps.lastElementChild) steps.lastElementChild.classList.add('ok');
-        lastKey = key;
-        const li = document.createElement('li');
-        li.textContent = text;
-        steps.appendChild(li);
-      };
-      try {
-        const r = await PetStudio.analyze(file, onStep);
-        const name = r.label === 'dog' ? 'Inu' : r.label === 'cat' ? 'Neko' : 'Buddy';
-        const draft = {
-          id: 'pet_' + S.uid(), name, species: r.species, ears: r.ears, pattern: r.pattern,
-          colors: r.colors, ui: r.ui, cutout: r.cutout, face: r.face, collarOn: true, photo: r.photo,
-          detector: r.detector, detected: r.label ? `${r.label} · ${Math.round(r.score * 100)}%` : 'main subject',
-          swatches: r.swatches, overlay: r.overlay, quality: r.quality,
-        };
-        setTimeout(() => editorStage(body, draft, close, false), 350);
-      } catch (e) {
-        console.error(e);
-        body.innerHTML = emptyState('Hmm, I couldn\'t read that photo', e.message || 'Try another image.', '<button class="btn primary" data-retry>Try again</button>');
-        $('[data-retry]', body).onclick = () => introStage(body, close);
-      }
-    }
+    drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove('over'); start(e.dataTransfer.files); };
   }
 
+  // Scanning progress panel inside the studio.
+  function scanPanel(body, url, title) {
+    body.innerHTML = `<div class="studio-scan">
+        <h3>${esc(title)}</h3>
+        <div class="scan-img"><img src="${url}" alt="Your photo"><i class="scan-line"></i></div>
+        <ol class="steps"></ol>
+      </div>`;
+    const steps = $('.steps', body);
+    let lastKey = null;
+    return (key, text) => {
+      if (key === lastKey && steps.lastElementChild) { steps.lastElementChild.textContent = text; return; }
+      if (steps.lastElementChild) steps.lastElementChild.classList.add('ok');
+      lastKey = key;
+      const li = document.createElement('li');
+      li.textContent = text;
+      steps.appendChild(li);
+    };
+  }
+
+  function templateFromResult(r, id) {
+    return {
+      id: id || 't' + S.uid(), cutout: r.cutout, face: r.face, photo: r.photo, pal: r.pal, region: r.region,
+      detected: r.label ? `${r.label} · ${Math.round(r.score * 100)}%` : r.region ? 'your highlight' : 'main subject',
+      detector: r.detector, segmenter: r.segmenter, quality: r.quality, overlay: r.overlay,
+    };
+  }
+
+  // Recompute colours from all photos of the character (unless the user tuned them by hand).
+  function refreshPalette(d) {
+    const merged = PetStudio.mergePalettes(d.templates.map((t) => t.pal));
+    if (!merged) return;
+    d.swatches = merged.swatches;
+    if (d.colorsTouched) return;
+    const th = PetStudio.themeFrom(merged, d.species);
+    d.colors = th.colors;
+    d.pattern = merged.pattern || d.pattern;
+    if (!d.uiTouched) d.ui = th.ui;
+  }
+
+  async function addPhotos(body, d, files, highlightFirst) {
+    let added = 0;
+    const room = MAX_PHOTOS - d.templates.length;
+    files = Array.from(files).slice(0, Math.max(0, room));
+    if (!files.length) { toast(`Up to ${MAX_PHOTOS} photos per character`, 'surprised'); return 0; }
+    for (let i = 0; i < files.length; i++) {
+      const url = URL.createObjectURL(files[i]);
+      let region = null;
+      if (highlightFirst) {
+        region = await highlightTool(url, null, `Photo ${i + 1} of ${files.length}`);
+        if (region === undefined) continue; // skipped
+      }
+      const step = scanPanel(body, url, `Scanning photo ${i + 1} of ${files.length}`);
+      try {
+        const r = await PetStudio.analyze(files[i], { onStep: step, region, known: d.templates.map((t) => t.pal) });
+        const tpl = templateFromResult(r);
+        if (!d.templates.length && r.species) { d.species = r.species; d.ears = r.ears; d.name = r.label === 'dog' ? 'Inu' : r.label === 'cat' ? 'Neko' : 'Buddy'; }
+        d.templates.push(tpl);
+        if (!d.mainId) d.mainId = tpl.id;
+        d._sel = tpl.id;
+        added++;
+      } catch (e) {
+        console.error(e);
+        toast(`Couldn't read photo ${i + 1}: ${e.message || 'unknown error'}`, 'worried');
+      }
+    }
+    if (added) refreshPalette(d);
+    return added;
+  }
+
+  /* ---------- highlight tool: paint over (or box) the main character ---------- */
+  function highlightTool(src, initial, subtitle) {
+    return new Promise((resolve) => {
+      let result; // undefined = cancelled
+      openSheet(`${sheetHeader('Highlight the character', '<button class="link strong" data-scan>Scan</button>')}
+        <p class="muted small pad">${subtitle ? `<b>${esc(subtitle)}</b> · ` : ''}Paint over your pet with your finger or mouse, or use <b>Box</b> and drag around it. The AI cuts out what you highlight.</p>
+        <div class="seg hl-modes"><button class="on" data-mode="paint">🖌️ Paint</button><button data-mode="box">▭ Box</button><button data-mode="erase">🧽 Erase</button></div>
+        <div class="hl-stage"><canvas class="hl-canvas"></canvas></div>
+        <label class="hl-brush"><span>Brush</span><input type="range" min="1" max="12" value="5" data-brush></label>
+        <div class="btn-row"><button class="btn ghost" data-clear>Clear</button><button class="btn ghost" data-auto>🤖 Auto-detect</button><button class="btn primary" data-scan>✨ Scan</button></div>`, {
+        className: 'full',
+        onClose: () => resolve(result),
+        onMount(sheet, close) {
+          const cv = $('.hl-canvas', sheet), ctx = cv.getContext('2d');
+          const paint = document.createElement('canvas'); // highlight layer in image space
+          let img, mode = 'paint', box = initial && initial.box ? Object.assign({}, initial.box) : null, drag = null, brush = 5;
+          let paths = initial && initial.paths ? initial.paths.map((pp) => pp.slice()) : []; // ordered brush strokes (for the AI scribble)
+          const dpr = window.devicePixelRatio || 1;
+          let cw = 0, chh = 0;
+          const layout = () => {
+            const maxW = $('.hl-stage', sheet).clientWidth || 440;
+            const maxH = Math.max(260, window.innerHeight * 0.55);
+            const k = Math.min(maxW / img.width, maxH / img.height);
+            cw = Math.round(img.width * k); chh = Math.round(img.height * k);
+            cv.style.width = cw + 'px'; cv.style.height = chh + 'px';
+            cv.width = Math.round(cw * dpr); cv.height = Math.round(chh * dpr);
+            draw();
+          };
+          const draw = () => {
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+            ctx.clearRect(0, 0, cv.width, cv.height);
+            ctx.drawImage(img, 0, 0, cv.width, cv.height);
+            if (box) {
+              const b = { x: box.x * cv.width, y: box.y * cv.height, w: box.w * cv.width, h: box.h * cv.height };
+              ctx.fillStyle = 'rgba(0,0,0,.45)';
+              ctx.fillRect(0, 0, cv.width, b.y); ctx.fillRect(0, b.y + b.h, cv.width, cv.height - b.y - b.h);
+              ctx.fillRect(0, b.y, b.x, b.h); ctx.fillRect(b.x + b.w, b.y, cv.width - b.x - b.w, b.h);
+              ctx.setLineDash([8 * dpr, 5 * dpr]); ctx.lineWidth = 2.5 * dpr; ctx.strokeStyle = '#FFD650';
+              ctx.strokeRect(b.x, b.y, b.w, b.h); ctx.setLineDash([]);
+            }
+            ctx.globalAlpha = 0.5;
+            ctx.drawImage(paint, 0, 0, cv.width, cv.height);
+            ctx.globalAlpha = 1;
+          };
+          const pos = (e) => { const r = cv.getBoundingClientRect(); return { x: clamp01((e.clientX - r.left) / r.width), y: clamp01((e.clientY - r.top) / r.height) }; };
+          const clamp01 = (v) => Math.max(0, Math.min(1, v));
+          const brushPx = () => (brush / 100) * Math.max(paint.width, paint.height) * 0.6;
+          const dab = (a, b) => {
+            const pc = paint.getContext('2d');
+            pc.globalCompositeOperation = mode === 'erase' ? 'destination-out' : 'source-over';
+            pc.strokeStyle = pc.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--primary').trim() || '#F2B632';
+            pc.lineWidth = brushPx() * 2; pc.lineCap = 'round'; pc.lineJoin = 'round';
+            pc.beginPath(); pc.moveTo(a.x * paint.width, a.y * paint.height); pc.lineTo(b.x * paint.width, b.y * paint.height); pc.stroke();
+          };
+          cv.addEventListener('pointerdown', (e) => {
+            e.preventDefault();
+            try { cv.setPointerCapture(e.pointerId); } catch (err) { /* synthetic or already released */ }
+            const p = pos(e);
+            drag = { start: p, last: p };
+            if (mode === 'box') box = { x: p.x, y: p.y, w: 0, h: 0 };
+            else { dab(p, p); if (mode === 'paint') paths.push([p]); }
+            draw();
+          });
+          cv.addEventListener('pointermove', (e) => {
+            if (!drag) return;
+            const p = pos(e);
+            if (mode === 'box') box = { x: Math.min(p.x, drag.start.x), y: Math.min(p.y, drag.start.y), w: Math.abs(p.x - drag.start.x), h: Math.abs(p.y - drag.start.y) };
+            else { dab(drag.last, p); if (mode === 'paint' && paths.length) paths[paths.length - 1].push(p); }
+            drag.last = p;
+            draw();
+          });
+          const end = () => { if (drag && mode === 'box' && box && (box.w < 0.03 || box.h < 0.03)) box = null; drag = null; draw(); };
+          cv.addEventListener('pointerup', end);
+          cv.addEventListener('pointercancel', end);
+          sheet.addEventListener('click', (e) => {
+            const m = e.target.closest('[data-mode]');
+            if (m) { mode = m.dataset.mode; $$('[data-mode]', sheet).forEach((b) => b.classList.toggle('on', b === m)); return; }
+            if (e.target.closest('[data-clear]')) { paint.getContext('2d').clearRect(0, 0, paint.width, paint.height); box = null; paths = []; draw(); return; }
+            if (e.target.closest('[data-auto]')) { result = null; close(); return; }
+            if (e.target.closest('[data-scan]')) {
+              // sample the painted area into points (erasing is taken into account)
+              const pc = paint.getContext('2d'), pd = pc.getImageData(0, 0, paint.width, paint.height).data;
+              const pts = [];
+              const step = Math.max(2, Math.round(Math.max(paint.width, paint.height) / 90));
+              for (let y = 0; y < paint.height; y += step) for (let x = 0; x < paint.width; x += step) if (pd[(y * paint.width + x) * 4 + 3] > 40) pts.push({ x: x / paint.width, y: y / paint.height });
+              if (!pts.length && !box) { toast('Paint over your pet first, or draw a box', 'surprised'); return; }
+              // keep only brush paths that still lie on painted pixels (after erasing)
+              const onPaint = (q) => pd[(Math.min(paint.height - 1, Math.round(q.y * paint.height)) * paint.width + Math.min(paint.width - 1, Math.round(q.x * paint.width))) * 4 + 3] > 40;
+              const keptPaths = paths.map((pp) => pp.filter(onPaint)).filter((pp) => pp.length > 1);
+              result = { strokes: pts.length ? pts : null, paths: keptPaths.length ? keptPaths : null, box: box || null, brush: brush / 100 * 0.6 };
+              close();
+            }
+          });
+          $('[data-brush]', sheet).oninput = (e) => { brush = +e.target.value; };
+          const im = new Image();
+          im.onload = () => {
+            img = im;
+            const k = Math.min(1, 900 / Math.max(im.width, im.height));
+            paint.width = Math.round(im.width * k); paint.height = Math.round(im.height * k);
+            if (initial && initial.strokes) {
+              const pc = paint.getContext('2d');
+              pc.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--primary').trim() || '#F2B632';
+              const r = (initial.brush || 0.03) * Math.max(paint.width, paint.height) * 0.7;
+              initial.strokes.forEach((p) => { pc.beginPath(); pc.arc(p.x * paint.width, p.y * paint.height, r, 0, 7); pc.fill(); });
+            }
+            requestAnimationFrame(layout);
+          };
+          im.src = src;
+          window.addEventListener('resize', () => img && layout(), { once: true });
+        },
+      });
+    });
+  }
+
+  /* ---------- eye editor with zoom & pan ---------- */
+  function eyeEditor(d, tpl) {
+    return new Promise((resolve) => {
+      let result; // undefined = cancelled
+      let eyes = tpl.face && tpl.face.eyes ? tpl.face.eyes.map((e) => Object.assign({}, e)) : [];
+      let one = eyes.length === 1, active = 0;
+      openSheet(`${sheetHeader('Adjust eyes', '<button class="link strong" data-save>Save</button>')}
+        <p class="muted small pad ez-hint"></p>
+        <div class="ez-stage">
+          <canvas class="ez-canvas"></canvas>
+          <div class="ez-zoom"><button data-z="out" aria-label="Zoom out">−</button><span class="ez-level">1×</span><button data-z="in" aria-label="Zoom in">＋</button><button data-z="fit" aria-label="Fit">⤢</button></div>
+        </div>
+        <div class="seg ez-which"><button class="on" data-eye="0">👁 Left eye</button><button data-eye="1">👁 Right eye</button></div>
+        <label class="hl-brush"><span>Eye size</span><input type="range" min="2" max="45" step="0.5" data-size></label>
+        <label class="toggle"><input type="checkbox" data-one ${one ? 'checked' : ''}> Only one eye visible (side view)</label>
+        <div class="ez-preview"><figure><img data-p="sleepy" alt=""><figcaption>😴</figcaption></figure><figure><img data-p="wink" alt=""><figcaption>😼</figcaption></figure><figure><img data-p="surprised" alt=""><figcaption>🙀</figcaption></figure><figure><img data-p="love" alt=""><figcaption>😻</figcaption></figure></div>
+        <div class="btn-row"><button class="btn ghost" data-reset>Clear eyes</button><button class="btn primary" data-save>Save eyes</button></div>`, {
+        className: 'full',
+        onClose: () => resolve(result),
+        onMount(sheet, close) {
+          const cv = $('.ez-canvas', sheet), ctx = cv.getContext('2d');
+          const N0 = Avatar.SIZE;
+          const dpr = window.devicePixelRatio || 1;
+          let img, css = 320, zoom = 1, vx = 0, vy = 0; // view: top-left image coord
+          const k = () => (css / N0) * zoom; // css px per image px
+          const clampView = () => {
+            const vis = N0 / zoom;
+            vx = Math.max(0, Math.min(N0 - vis, vx)); vy = Math.max(0, Math.min(N0 - vis, vy));
+          };
+          const toImg = (sx, sy) => ({ x: vx + sx / k(), y: vy + sy / k() });
+          const toScr = (ix, iy) => ({ x: (ix - vx) * k(), y: (iy - vy) * k() });
+          const zoomAt = (nz, sx, sy) => {
+            const p = toImg(sx, sy);
+            zoom = Math.max(1, Math.min(10, nz));
+            vx = p.x - sx / k(); vy = p.y - sy / k();
+            clampView(); draw();
+          };
+          const hint = () => {
+            $('.ez-hint', sheet).innerHTML = `Pinch, scroll or use ＋ to zoom · drag to move · <b>tap the ${one ? 'eye' : active === 0 ? 'left eye' : 'right eye'}</b> to place it · drag a circle to fine-tune.`;
+            $('.ez-which', sheet).style.display = one ? 'none' : '';
+            $$('[data-eye]', sheet).forEach((b) => b.classList.toggle('on', +b.dataset.eye === active));
+            const e = eyes[active];
+            $('[data-size]', sheet).value = e ? e.r : 12;
+            $('.ez-level', sheet).textContent = (Math.round(zoom * 10) / 10) + '×';
+          };
+          const draw = () => {
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            ctx.clearRect(0, 0, css, css);
+            const t = 16;
+            for (let y = 0; y < css; y += t) for (let x = 0; x < css; x += t) { ctx.fillStyle = ((x + y) / t) % 2 ? '#F3EFEA' : '#FFFFFF'; ctx.fillRect(x, y, t, t); }
+            ctx.imageSmoothingQuality = 'high';
+            ctx.drawImage(img, vx, vy, N0 / zoom, N0 / zoom, 0, 0, css, css);
+            eyes.forEach((e, i) => {
+              if (one && i > 0) return;
+              const p = toScr(e.x, e.y), r = Math.max(6, e.r * k());
+              ctx.lineWidth = i === active ? 3 : 2;
+              ctx.strokeStyle = i === active ? '#4BE38A' : '#FFD650';
+              ctx.fillStyle = 'rgba(75,227,138,.12)';
+              ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+              ctx.beginPath(); ctx.moveTo(p.x - r * 0.4, p.y); ctx.lineTo(p.x + r * 0.4, p.y); ctx.moveTo(p.x, p.y - r * 0.4); ctx.lineTo(p.x, p.y + r * 0.4); ctx.stroke();
+              ctx.font = '700 12px system-ui,sans-serif'; ctx.fillStyle = '#fff'; ctx.strokeStyle = 'rgba(0,0,0,.6)'; ctx.lineWidth = 3;
+              const label = one ? 'eye' : i === 0 ? 'L' : 'R';
+              ctx.strokeText(label, p.x + r + 4, p.y - r); ctx.fillText(label, p.x + r + 4, p.y - r);
+            });
+            hint();
+          };
+          let pvT;
+          const preview = () => {
+            clearTimeout(pvT);
+            pvT = setTimeout(async () => {
+              const face = currentFace();
+              const t = { id: 'ez-' + d.id, species: d.species, templates: [{ id: tpl.id, cutout: tpl.cutout, face }], mainId: tpl.id, collarOn: d.collarOn !== false, colors: d.colors, ui: d.ui };
+              await Avatar.prepare(t);
+              $$('[data-p]', sheet).forEach((im) => { const u = Avatar.get(t, im.dataset.p, 'portrait-plain'); if (u) im.src = u; });
+            }, 200);
+          };
+          const currentFace = () => {
+            const list = (one ? eyes.slice(0, 1) : eyes.slice(0, 2)).filter(Boolean).map((e) => ({ x: Math.round(e.x * 10) / 10, y: Math.round(e.y * 10) / 10, r: Math.round(e.r * 10) / 10 }));
+            return list.length ? { eyes: list } : null;
+          };
+          const defaultR = () => (eyes[0] && eyes[0].r) || (eyes[1] && eyes[1].r) || 12;
+
+          // pointers: tap = place, drag circle = move it, drag elsewhere = pan, two fingers = pinch-zoom
+          const ptrs = new Map();
+          let gesture = null;
+          const local = (e) => { const r = cv.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+          cv.addEventListener('pointerdown', (e) => {
+            e.preventDefault();
+            try { cv.setPointerCapture(e.pointerId); } catch (err) { /* synthetic or already released */ }
+            const p = local(e);
+            ptrs.set(e.pointerId, p);
+            if (ptrs.size === 2) {
+              const [a, b] = [...ptrs.values()];
+              gesture = { type: 'pinch', dist: Math.hypot(a.x - b.x, a.y - b.y), zoom };
+              return;
+            }
+            const hit = eyes.findIndex((ey, i) => { if (!ey || (one && i > 0)) return false; const s2 = toScr(ey.x, ey.y); return Math.hypot(s2.x - p.x, s2.y - p.y) < Math.max(16, ey.r * k()); });
+            gesture = hit >= 0 ? { type: 'eye', i: hit, start: p, moved: false } : { type: 'maybe', start: p, vx, vy, moved: false };
+            if (hit >= 0) { active = hit; draw(); }
+          });
+          cv.addEventListener('pointermove', (e) => {
+            if (!ptrs.has(e.pointerId) || !gesture) return;
+            const p = local(e);
+            ptrs.set(e.pointerId, p);
+            if (gesture.type === 'pinch' && ptrs.size === 2) {
+              const [a, b] = [...ptrs.values()];
+              zoomAt(gesture.zoom * (Math.hypot(a.x - b.x, a.y - b.y) / gesture.dist), (a.x + b.x) / 2, (a.y + b.y) / 2);
+              return;
+            }
+            const dx = p.x - gesture.start.x, dy = p.y - gesture.start.y;
+            if (Math.hypot(dx, dy) > 6) gesture.moved = true;
+            if (gesture.type === 'eye') {
+              const ip = toImg(p.x, p.y);
+              eyes[gesture.i].x = ip.x; eyes[gesture.i].y = ip.y;
+              draw();
+            } else if (gesture.moved) {
+              vx = gesture.vx - dx / k(); vy = gesture.vy - dy / k();
+              clampView(); draw();
+            }
+          });
+          const up = (e) => {
+            if (!ptrs.has(e.pointerId)) return;
+            const p = ptrs.get(e.pointerId);
+            ptrs.delete(e.pointerId);
+            if (!gesture) return;
+            if (gesture.type === 'maybe' && !gesture.moved && ptrs.size === 0) {
+              const ip = toImg(p.x, p.y);
+              eyes[active] = { x: ip.x, y: ip.y, r: (eyes[active] && eyes[active].r) || defaultR() };
+              if (!one && active === 0 && !eyes[1]) active = 1;
+              draw();
+            }
+            if (ptrs.size === 0) { gesture = null; preview(); }
+          };
+          cv.addEventListener('pointerup', up);
+          cv.addEventListener('pointercancel', up);
+          cv.addEventListener('wheel', (e) => { e.preventDefault(); const p = local(e); zoomAt(zoom * Math.pow(1.0015, -e.deltaY), p.x, p.y); }, { passive: false });
+          cv.addEventListener('dblclick', (e) => { const p = local(e); zoomAt(zoom * 2, p.x, p.y); });
+
+          sheet.addEventListener('click', (e) => {
+            const z = e.target.closest('[data-z]');
+            if (z) {
+              if (z.dataset.z === 'fit') { zoom = 1; vx = vy = 0; draw(); return; }
+              const e0 = eyes[active];
+              const c = e0 ? toScr(e0.x, e0.y) : { x: css / 2, y: css / 2 };
+              zoomAt(zoom * (z.dataset.z === 'in' ? 1.6 : 1 / 1.6), Math.max(0, Math.min(css, c.x)), Math.max(0, Math.min(css, c.y)));
+              return;
+            }
+            const w = e.target.closest('[data-eye]');
+            if (w) { active = +w.dataset.eye; draw(); return; }
+            if (e.target.closest('[data-reset]')) { eyes = []; active = 0; draw(); preview(); return; }
+            if (e.target.closest('[data-save]')) { result = currentFace(); close(); }
+          });
+          $('[data-size]', sheet).oninput = (e) => { if (eyes[active]) { eyes[active].r = +e.target.value; draw(); preview(); } };
+          $('[data-one]', sheet).onchange = (e) => { one = e.target.checked; active = 0; draw(); preview(); };
+
+          const im = new Image();
+          im.onload = () => {
+            img = im;
+            css = Math.min($('.ez-stage', sheet).clientWidth || 360, 520);
+            cv.style.width = cv.style.height = css + 'px';
+            cv.width = cv.height = Math.round(css * dpr);
+            // start zoomed on the face if we know where the eyes are
+            if (eyes.length) {
+              const cx = eyes.reduce((a, e) => a + e.x, 0) / eyes.length, cy = eyes.reduce((a, e) => a + e.y, 0) / eyes.length;
+              zoom = 2.2; vx = cx - N0 / zoom / 2; vy = cy - N0 / zoom / 2; clampView();
+            }
+            draw(); preview();
+          };
+          im.src = tpl.cutout;
+        },
+      });
+    });
+  }
+
+  /* ---------- editor ---------- */
   function editorStage(body, d, close, editing) {
     const sel = (name, opts, v) => `<select name="${name}">${opts.map(([k, l]) => `<option value="${k}" ${k === v ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
     const colourField = (k, label) => `<label class="swatch-field"><input type="color" name="c_${k}" value="${d.colors[k]}"><span>${label}</span></label>`;
-    let mood = 'happy', placing = 0, newEyes = [];
+    d.moodMap = d.moodMap || {};
+    const mood = () => d._mood || 'happy';
+    const selTpl = () => d.templates.find((t) => t.id === d._sel) || d.templates.find((t) => t.id === d.mainId) || d.templates[0];
+    const one = (tpl) => ({ id: 'draft-' + d.id + '-' + tpl.id, species: d.species, templates: [{ id: tpl.id, cutout: tpl.cutout, face: tpl.face }], mainId: tpl.id, collarOn: d.collarOn !== false, colors: d.colors, ui: d.ui });
+    const draftTheme = () => ({
+      id: 'draft-' + d.id, name: d.name, species: d.species, builtin: false,
+      templates: d.templates.map((t) => ({ id: t.id, cutout: t.cutout, face: t.face })), mainId: d.mainId, moodMap: d.moodMap,
+      collarOn: d.collarOn !== false, colors: d.colors, ui: d.ui,
+    });
+    const eyeText = (t) => (t.face && t.face.eyes ? (t.face.eyes.length === 2 ? '👀 2 eyes' : '👁 1 eye') : '⚠️ no eyes');
+    const tplCards = () => d.templates.map((t, i) => `
+      <div class="tpl-card ${t.id === (selTpl() || {}).id ? 'sel' : ''}" data-t="${t.id}">
+        <button type="button" class="tpl-pic" data-t-sel="${t.id}"><img alt="Photo ${i + 1}"></button>
+        <div class="tpl-meta"><b>Photo ${i + 1}${t.id === d.mainId ? ' ⭐' : ''}</b><small>${eyeText(t)}${t.quality === 'ellipse' ? ' · rough' : ''}</small></div>
+        <div class="tpl-actions">
+          <button type="button" data-t-hl="${t.id}" title="Highlight & rescan" ${t.photo ? '' : 'disabled'}>✏️</button>
+          <button type="button" data-t-eyes="${t.id}" title="Adjust eyes">👀</button>
+          <button type="button" data-t-main="${t.id}" title="Use as main photo">⭐</button>
+          <button type="button" data-t-del="${t.id}" title="Remove" ${d.templates.length > 1 ? '' : 'disabled'}>🗑</button>
+        </div>
+      </div>`).join('');
+    const st = selTpl();
     body.innerHTML = `
       <div class="studio-edit">
+        <h4 class="moods-title">Photos of ${esc(d.name)} <small>(${d.templates.length}/${MAX_PHOTOS})</small></h4>
+        <div class="tpl-strip">${tplCards()}
+          ${d.templates.length < MAX_PHOTOS ? '<label class="tpl-add"><input type="file" accept="image/*" multiple hidden data-add><span>＋</span>Add photos</label>' : ''}
+        </div>
         <div class="detect-row">
-          ${d.overlay ? `<figure><img src="${d.overlay}" alt="Detection"><figcaption>Detected: <b>${esc(d.detected)}</b><br><small>${esc(d.detector)}${d.quality === 'ellipse' ? ' · rough cut-out' : ''}</small></figcaption></figure>` : ''}
-          <figure class="real-stage ${d.overlay ? '' : 'wide'}"><img class="big-real" alt="Realistic preview"><figcaption class="eye-hint"></figcaption></figure>
+          ${st && st.overlay ? `<figure><img src="${st.overlay}" alt="Detection"><figcaption>Detected: <b>${esc(st.detected || '')}</b><br><small>${esc(st.detector || '')}${st.segmenter ? ' · ' + esc(st.segmenter) : ''}</small></figcaption></figure>` : ''}
+          <figure class="real-stage ${st && st.overlay ? '' : 'wide'}"><img class="big-real" alt="Realistic preview"><figcaption class="eye-hint"></figcaption></figure>
         </div>
         <div class="studio-tools">
-          <button type="button" class="btn ghost" data-eyes>👀 Adjust eyes</button>
-          <label class="toggle"><input type="checkbox" data-collar ${d.collarOn !== false ? 'checked' : ''}> 🔔 Maneki collar & bell</label>
+          <button type="button" class="btn ghost" data-t-hl="${st ? st.id : ''}" ${st && st.photo ? '' : 'disabled'}>✏️ Highlight pet</button>
+          <button type="button" class="btn ghost" data-t-eyes="${st ? st.id : ''}">👀 Adjust eyes</button>
+          <label class="toggle"><input type="checkbox" data-collar ${d.collarOn !== false ? 'checked' : ''}> 🔔 Collar & bell</label>
         </div>
         <h4 class="moods-title">Moods</h4>
-        <div class="moods studio-moods">${Object.keys(Avatar.STATES).map((m) => `<button type="button" class="mood ${m === mood ? 'on' : ''}" data-m="${m}"><img alt=""><span>${Avatar.emojiFor(d, m)} ${Avatar.STATES[m].label}</span></button>`).join('')}</div>
+        <div class="moods studio-moods">${Object.keys(Avatar.STATES).map((m) => `<button type="button" class="mood ${m === mood() ? 'on' : ''}" data-m="${m}"><img alt=""><span>${Avatar.emojiFor(d, m)} ${Avatar.STATES[m].label}</span></button>`).join('')}</div>
+        ${d.templates.length > 1 ? `<div class="mood-photo"><span>Photo for <b class="mp-label"></b>:</span><div class="mp-chips"></div></div>` : ''}
         <div class="preview-stage" style="--pp:${d.ui.primary};--pbg:${d.ui.bg};--pon:${d.ui.onPrimary};--pdk:${d.ui.primaryDark}">
           <div class="mini-app">
             <div class="mini-hdr"><span class="mini-av"></span><span><small>Maneki <b class="mini-name"></b></small><b>${fmt(S.balance('all'))}</b></span></div>
@@ -951,7 +1327,7 @@
             </div>
           </details>
           <div class="btn-row">
-            ${editing ? '<button type="button" class="btn danger" data-del>Delete</button>' : '<button type="button" class="btn ghost" data-again>Another photo</button>'}
+            ${editing ? '<button type="button" class="btn danger" data-del>Delete</button>' : '<button type="button" class="btn ghost" data-again>Start over</button>'}
             <button type="submit" class="btn primary">${editing ? 'Save' : 'Use this theme'}</button>
           </div>
         </form>
@@ -960,27 +1336,29 @@
     const f = $('form', body);
     const stage = $('.preview-stage', body);
     const big = $('.big-real', body);
-    const hint = $('.eye-hint', body);
-    const draftTheme = () => ({
-      id: 'draft-' + d.id, name: d.name, species: d.species, builtin: false,
-      cutout: d.cutout, sticker: d.sticker, face: d.face, collarOn: d.collarOn !== false, colors: d.colors, ui: d.ui,
-    });
-    const setHint = () => {
-      hint.innerHTML = placing
-        ? `<b>Tap the ${placing === 1 ? 'left' : 'right'} eye</b> on the picture`
-        : d.face && d.face.eyes ? '✓ Eyes found — moods can open, close & wink them' : '⚠️ Eyes not found — tap “Adjust eyes” for blinking moods';
-    };
+    const rerender = () => editorStage(body, d, close, editing);
     let seq = 0;
     const paintReal = async () => {
       const my = ++seq;
       const t = draftTheme();
       await Avatar.prepare(t);
+      await Promise.all(d.templates.map((tp) => Avatar.prepare(one(tp))));
       if (my !== seq) return;
-      const url = Avatar.get(t, placing ? 'normal' : mood, 'sticker');
+      const url = Avatar.get(t, mood(), 'sticker');
       if (url) big.src = url;
       $$('.studio-moods [data-m]', body).forEach((b) => { const u = Avatar.get(t, b.dataset.m, 'portrait'); if (u) $('img', b).src = u; });
-      $('.mini-av', body).innerHTML = Avatar.get(t, 'normal', 'portrait-plain') ? `<img src="${Avatar.get(t, 'normal', 'portrait-plain')}" alt="">` : '';
-      setHint();
+      d.templates.forEach((tp) => { const im = $(`[data-t-sel="${tp.id}"] img`, body); const u = Avatar.get(one(tp), 'normal', 'sticker'); if (im && u) im.src = u; });
+      const plain = Avatar.get(t, 'normal', 'portrait-plain');
+      $('.mini-av', body).innerHTML = plain ? `<img src="${plain}" alt="">` : '';
+      const used = Avatar.templateFor(t, mood());
+      const idx = d.templates.findIndex((x) => used && x.id === used.id);
+      $('.eye-hint', body).innerHTML = `${Avatar.emojiFor(d, mood())} ${Avatar.STATES[mood()].label} · photo ${idx + 1} · ${used && used.face && used.face.eyes ? '✓ eyes found' : '⚠️ no eyes, tap “Adjust eyes”'}`;
+      const mp = $('.mp-chips', body);
+      if (mp) {
+        $('.mp-label', body).textContent = `${Avatar.emojiFor(d, mood())} ${Avatar.STATES[mood()].label}`;
+        const cur = d.moodMap[mood()] || '';
+        mp.innerHTML = `<button type="button" class="chip-btn ${cur ? '' : 'on'}" data-mp="">Auto</button>` + d.templates.map((tp, i) => `<button type="button" class="chip-btn ${cur === tp.id ? 'on' : ''}" data-mp="${tp.id}"><img src="${Avatar.get(one(tp), 'normal', 'portrait-plain') || ''}" alt="">${i + 1}</button>`).join('');
+      }
     };
     const paint = () => {
       d.name = f.elements.name.value.trim() || 'Buddy';
@@ -1000,48 +1378,66 @@
     };
     paint();
     f.addEventListener('input', (e) => {
-      if (e.target.name === 'primary') d.ui = PetStudio.deriveUI(e.target.value);
+      if (e.target.name === 'primary') { d.ui = PetStudio.deriveUI(e.target.value); d.uiTouched = true; }
+      if (e.target.name && e.target.name.startsWith('c_')) d.colorsTouched = true;
       if (e.target.name === 'species') f.ears.value = N.SPECIES_EARS[f.species.value] || 'pointy';
       paint();
     });
     $('[data-collar]', body).onchange = (e) => { d.collarOn = e.target.checked; paintReal(); };
-    $('[data-eyes]', body).onclick = () => {
-      placing = 1; newEyes = [];
-      big.parentElement.classList.add('placing');
-      paintReal();
+    const addInput = $('[data-add]', body);
+    if (addInput) addInput.onchange = async () => {
+      const files = Array.from(addInput.files);
+      if (!files.length) return;
+      await addPhotos(body, d, files, false);
+      rerender();
     };
-    big.addEventListener('click', (e) => {
-      if (!placing) return;
-      const r = big.getBoundingClientRect();
-      const x = ((e.clientX - r.left) / r.width) * Avatar.SIZE, y = ((e.clientY - r.top) / r.height) * Avatar.SIZE;
-      newEyes.push({ x, y });
-      if (placing === 1) { placing = 2; setHint(); return; }
-      const dist = Math.hypot(newEyes[1].x - newEyes[0].x, newEyes[1].y - newEyes[0].y);
-      const old = d.face && d.face.eyes ? (d.face.eyes[0].r + d.face.eyes[1].r) / 2 : 0;
-      const rad = old && old < dist * 0.4 ? old : Math.max(4, dist * 0.2);
-      d.face = { eyes: newEyes.map((p) => ({ x: Math.round(p.x * 10) / 10, y: Math.round(p.y * 10) / 10, r: Math.round(rad * 10) / 10 })) };
-      placing = 0;
-      big.parentElement.classList.remove('placing');
-      paintReal();
-    });
-    body.addEventListener('click', (e) => {
-      const sw = e.target.closest('[data-sw]');
-      if (sw) {
-        d.ui = PetStudio.deriveUI(sw.dataset.sw);
-        f.primary.value = d.ui.primary;
-        paint();
+
+    body.addEventListener('click', async (e) => {
+      const q = (a) => e.target.closest(`[${a}]`);
+      let b;
+      if ((b = q('data-sw'))) { d.ui = PetStudio.deriveUI(b.dataset.sw); d.uiTouched = true; f.primary.value = d.ui.primary; paint(); return; }
+      if ((b = q('data-m'))) { d._mood = b.dataset.m; $$('.studio-moods [data-m]', body).forEach((x) => x.classList.toggle('on', x === b)); paintReal(); return; }
+      if ((b = q('data-mp'))) { if (b.dataset.mp) d.moodMap[mood()] = b.dataset.mp; else delete d.moodMap[mood()]; paintReal(); return; }
+      if ((b = q('data-t-sel'))) { d._sel = b.dataset.tSel; rerender(); return; }
+      if ((b = q('data-t-main'))) { d.mainId = b.dataset.tMain; toast('Main photo set — used for the icon & favicon', 'happy'); rerender(); return; }
+      if ((b = q('data-t-del'))) {
+        const id = b.dataset.tDel;
+        if (d.templates.length < 2) return;
+        d.templates = d.templates.filter((t) => t.id !== id);
+        if (d.mainId === id) d.mainId = d.templates[0].id;
+        Object.keys(d.moodMap).forEach((m) => { if (d.moodMap[m] === id) delete d.moodMap[m]; });
+        refreshPalette(d);
+        rerender();
+        return;
       }
-      const mb = e.target.closest('[data-m]');
-      if (mb) {
-        mood = mb.dataset.m;
-        $$('.studio-moods [data-m]', body).forEach((b) => b.classList.toggle('on', b === mb));
-        paintReal();
+      if ((b = q('data-t-eyes'))) {
+        const tpl = d.templates.find((t) => t.id === b.dataset.tEyes);
+        if (!tpl) return;
+        const face = await eyeEditor(d, tpl);
+        if (face !== undefined) { tpl.face = face; d._sel = tpl.id; rerender(); }
+        return;
+      }
+      if ((b = q('data-t-hl'))) {
+        const tpl = d.templates.find((t) => t.id === b.dataset.tHl);
+        if (!tpl || !tpl.photo) return;
+        const region = await highlightTool(tpl.photo, tpl.region);
+        if (region === undefined) return;
+        const step = scanPanel(body, tpl.photo, 'Rescanning photo');
+        try {
+          const r = await PetStudio.analyze(tpl.photo, { onStep: step, region, known: d.templates.filter((t) => t !== tpl).map((t) => t.pal) });
+          Object.assign(tpl, templateFromResult(r, tpl.id));
+          refreshPalette(d);
+        } catch (err) {
+          toast('Rescan failed: ' + (err.message || err), 'worried');
+        }
+        d._sel = tpl.id;
+        rerender();
       }
     });
     const again = $('[data-again]', body);
     if (again) again.onclick = () => introStage(body, close);
     const del = $('[data-del]', body);
-    if (del) del.onclick = () => confirmSheet(`Delete ${d.name}?`, 'The theme and its photo cut-out will be removed.', 'Delete', () => {
+    if (del) del.onclick = () => confirmSheet(`Delete ${d.name}?`, 'The theme and its photos will be removed.', 'Delete', () => {
       S.remove('themes', d.id);
       if (S.state.settings.theme === d.id) S.state.settings.theme = 'mit';
       S.save(); close(); render(); toast('Back to Mit 🐾', 'love');
@@ -1051,10 +1447,11 @@
       paint();
       const saved = {
         id: d.id, name: d.name, species: d.species, ears: d.ears, pattern: d.pattern,
-        colors: d.colors, ui: d.ui, cutout: d.cutout, face: d.face || null, collarOn: d.collarOn !== false, photo: d.photo,
-        detector: d.detector, detected: d.detected, swatches: d.swatches, createdAt: d.createdAt || Date.now(),
+        colors: d.colors, ui: d.ui, collarOn: d.collarOn !== false, swatches: d.swatches,
+        templates: d.templates.map((t) => ({ id: t.id, cutout: t.cutout, face: t.face || null, photo: t.photo || null, pal: t.pal || null, region: t.region || null, detected: t.detected || '', quality: t.quality || '' })),
+        mainId: d.mainId, moodMap: d.moodMap, colorsTouched: !!d.colorsTouched, uiTouched: !!d.uiTouched,
+        createdAt: d.createdAt || Date.now(),
       };
-      if (!saved.cutout && d.sticker) saved.sticker = d.sticker; // themes made before realistic avatars
       S.upsert('themes', saved);
       S.state.settings.theme = saved.id;
       if (!S.save()) return;

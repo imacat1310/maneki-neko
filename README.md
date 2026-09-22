@@ -36,15 +36,19 @@ Eyes are found automatically. If they're missed, use **Adjust eyes** in Pet Stud
 
 ## Pet Studio: turn your pet into the mascot
 
-Account → **Add your pet** → choose a photo:
+Account → **Add your pet** → choose **one or more photos** (up to 6) of the same character.
 
-1. **Detect**: finds the main character with TensorFlow.js **COCO-SSD** (loaded from a CDN when online). If that's not available, it falls back to an **offline saliency detector** built in.
-2. **Cut out**: foreground/background colour models, smoothing, largest blob, hole filling → a transparent cut-out.
-3. **Read**: k-means palette → fur, light fur, stripe colour, eye and nose colour, coat pattern (tabby / solid / bicolour).
-4. **Find eyes**: pairs of iris/pupil blobs side by side in the upper face.
-5. **Build**: a hi-res transparent **cut-out** → realistic avatars in 9 moods, a realistic **app icon** and favicon, a cartoon **maneki-neko drawing** (optional), and a complete **app theme** (header, buttons, background, app name "Maneki <Name>").
+1. **Detect**: TensorFlow.js **COCO-SSD** finds the character. If the small model is unsure (curled up, lying down, side-on), a larger model takes a second look. From the second photo on, candidates are also **matched by colour** against the photos you already added, so the same character is picked when there are several animals.
+2. **Cut out**: the **MediaPipe interactive segmenter** ("magic touch") cuts the character out of a crop around it, trying several points and keeping the best mask. If a mask swallows background, it's trimmed back to the character's colours. Offline fallback: a colour-model cut-out that refines itself over several passes.
+3. **Find eyes** at any head angle, including lying on its side. A real eye needs an iris around a dark pupil, ideally with a catch-light. A side-on face with one visible eye works too.
+4. **Build**: hi-res cut-out → realistic avatars in 9 moods (collar, hat and eyelids follow the head's angle), app icon & favicon, cartoon version, and an app theme with colours merged from all photos.
 
-Everything can be tweaked before saving (name, species, ears, coat, each colour, theme colour chips taken from the photo). Switch between themes at any time. Photos never leave your device.
+### Tools
+- **✏️ Highlight pet**: paint over the character (🖌️), drag a **Box** (▭), or **Erase** (🧽), then **Scan**. Your brush strokes go straight to the AI segmenter. You can also tick "Let me highlight my pet in each photo" before choosing photos.
+- **👀 Adjust eyes**: a zoomable view (pinch, scroll, ＋/−, double-tap). Tap to place the left and right eye, drag a circle to fine-tune, set the eye size, or mark "only one eye visible". Mood previews update live.
+- **Multiple photos**: each photo becomes a template. ⭐ sets the main photo (used for the icon), and **Photo for <mood>** chooses which photo each mood uses. For example, use a real sleeping photo for 😴 Sleepy.
+
+The AI parts download once (~6 MB model + ~12 MB runtime) and are cached for offline use. Photos never leave your device.
 
 ## Files
 

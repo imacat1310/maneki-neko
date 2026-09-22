@@ -104,61 +104,88 @@
     return n ? root.Neko.util.rgbToHex(r / n, g / n, b / n) : null;
   }
 
+  function centroid(data) {
+    let sx = 0, sy = 0, n = 0;
+    for (let y = 0; y < S; y += 2) for (let x = 0; x < S; x += 2) if (data[(y * S + x) * 4 + 3] > 128) { sx += x; sy += y; n++; }
+    return n ? { x: sx / n, y: sy / n } : { x: S / 2, y: S / 2 };
+  }
+
+  // Face frame: eye centre, eye distance d, head angle, u = along the eyes, v = towards the chin.
   function computeFace(data, given) {
     const bb = analyseBase(data);
     const h = bb.y1 - bb.y0;
-    let eyes = given && given.eyes && given.eyes.length === 2 ? given.eyes.slice().sort((a, b) => a.x - b.x) : null;
-    let cx, ey, d;
-    if (eyes) {
-      d = Math.hypot(eyes[1].x - eyes[0].x, eyes[1].y - eyes[0].y);
-      cx = (eyes[0].x + eyes[1].x) / 2;
-      ey = (eyes[0].y + eyes[1].y) / 2;
+    const eyes = given && given.eyes && given.eyes.length ? given.eyes.map((e) => Object.assign({}, e)) : null;
+    const mass = centroid(data);
+    let cx, cy, d, ang = 0;
+    if (eyes && eyes.length >= 2) {
+      const [a, b] = eyes;
+      d = Math.hypot(b.x - a.x, b.y - a.y);
+      ang = Math.atan2(b.y - a.y, b.x - a.x);
+      cx = (a.x + b.x) / 2; cy = (a.y + b.y) / 2;
+      // the chin is on the side where the body is
+      const vx = -Math.sin(ang), vy = Math.cos(ang);
+      if ((mass.x - cx) * vx + (mass.y - cy) * vy < -d * 0.1) { ang += Math.PI; eyes.reverse(); }
+    } else if (eyes && eyes.length === 1) {
+      const e = eyes[0];
+      d = Math.max(e.r * 4.2, 14);
+      const dir = mass.x >= e.x ? 1 : -1; // the hidden eye is towards the middle of the head
+      cx = e.x + dir * d * 0.5; cy = e.y;
     } else {
       const span = rowSpan(data, bb.y0 + h * 0.3) || { w: bb.x1 - bb.x0, c: (bb.x0 + bb.x1) / 2 };
       d = span.w * 0.36;
       cx = span.c;
-      ey = bb.y0 + Math.min(span.w * 0.55, h * 0.4);
+      cy = bb.y0 + Math.min(span.w * 0.55, h * 0.4);
     }
-    const neckY = Math.min(ey + d * 1.2, bb.y0 + h * 0.85);
-    const headTop = bb.y0;
-    const bottom = neckY + d * 0.7;
-    const c = Math.max(bottom - headTop + d * 0.2, d * 3.1) * 1.3;
-    const crop = { x: cx - c / 2, y: (headTop + bottom) / 2 - c / 2 + d * 0.1, s: c };
-    const fur = (eyes && (sampleColour(data, cx, ey - d * 0.55, d * 0.18) || sampleColour(data, cx, ey, d * 0.15))) || sampleColour(data, cx, headTop + h * 0.15, d * 0.2) || '#999999';
-    return { eyes, d, cx, ey, neckY, headTop, crop, bb, fur };
+    const u = { x: Math.cos(ang), y: Math.sin(ang) }, v = { x: -Math.sin(ang), y: Math.cos(ang) };
+    const at = (along, down) => ({ x: cx + u.x * along + v.x * down, y: cy + u.y * along + v.y * down });
+    const neck = at(0, d * 1.2);
+    const top = at(0, -d * 1.1);
+    let crop;
+    if (eyes) {
+      const c = d * 4.4, cc = at(0, d * 0.3);
+      crop = { x: cc.x - c / 2, y: cc.y - c / 2, s: c };
+    } else {
+      const bottom = Math.min(cy + d * 1.9, bb.y0 + h * 0.95);
+      const c = Math.max(bottom - bb.y0 + d * 0.2, d * 3.1) * 1.3;
+      crop = { x: cx - c / 2, y: (bb.y0 + bottom) / 2 - c / 2 + d * 0.1, s: c };
+    }
+    const up = at(0, -d * 0.55);
+    const fur = sampleColour(data, up.x, up.y, d * 0.18) || sampleColour(data, cx, cy, d * 0.15) || '#999999';
+    return { eyes, d, cx, cy, ang, u, v, at, neck, top, crop, bb, fur };
   }
 
   /* ---------- face edits ---------- */
-  function lidFill(ctx, e, fur, cy, rad) {
-    const g = ctx.createRadialGradient(e.x, cy, 0, e.x, cy, rad);
+  function lidFill(ctx, x, y, fur, rad) {
+    const g = ctx.createRadialGradient(x, y, 0, x, y, rad);
     g.addColorStop(0, rgba(fur, 1));
     g.addColorStop(0.72, rgba(fur, 1));
     g.addColorStop(1, rgba(fur, 0));
     ctx.fillStyle = g;
-    ctx.fillRect(e.x - rad, cy - rad, rad * 2, rad * 2);
+    ctx.fillRect(x - rad, y - rad, rad * 2, rad * 2);
   }
-  function lash(ctx, e, up) {
+  // Run fn in the eye's local frame (x along the eye line, y towards the chin).
+  function local(ctx, e, ang, fn) {
     ctx.save();
-    ctx.strokeStyle = 'rgba(28,22,20,.88)';
-    ctx.lineWidth = Math.max(1.6, e.r * 0.2);
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    if (up) { // happy "^"
-      ctx.moveTo(e.x - e.r * 1.05, e.y + e.r * 0.25);
-      ctx.quadraticCurveTo(e.x, e.y - e.r * 0.75, e.x + e.r * 1.05, e.y + e.r * 0.25);
-    } else { // closed "︶"
-      ctx.moveTo(e.x - e.r * 1.05, e.y - e.r * 0.05);
-      ctx.quadraticCurveTo(e.x, e.y + e.r * 0.6, e.x + e.r * 1.05, e.y - e.r * 0.05);
-    }
-    ctx.stroke();
+    ctx.translate(e.x, e.y);
+    ctx.rotate(ang);
+    fn();
     ctx.restore();
   }
-  // Clone-stamp real fur from nearby (above the eye for lids, the cheek for squints).
-  function clonePatch(ctx, src, e, dy, R) {
+  function lash(ctx, r, up) {
+    ctx.strokeStyle = 'rgba(28,22,20,.88)';
+    ctx.lineWidth = Math.max(1.6, r * 0.2);
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    if (up) { ctx.moveTo(-r * 1.05, r * 0.25); ctx.quadraticCurveTo(0, -r * 0.75, r * 1.05, r * 0.25); }
+    else { ctx.moveTo(-r * 1.05, -r * 0.05); ctx.quadraticCurveTo(0, r * 0.6, r * 1.05, -r * 0.05); }
+    ctx.stroke();
+  }
+  // Clone-stamp real fur from nearby (src centre → drawn at the eye), soft edges.
+  function clonePatch(ctx, src, e, from, R) {
     const D = Math.ceil(R * 2);
     const t = canvas(D);
     const tc = t.getContext('2d');
-    tc.drawImage(src, e.x - R, e.y - R - dy, D, D, 0, 0, D, D);
+    tc.drawImage(src, from.x - R, from.y - R, D, D, 0, 0, D, D);
     const g = tc.createRadialGradient(D / 2, D / 2, 0, D / 2, D / 2, D / 2);
     g.addColorStop(0, 'rgba(0,0,0,1)');
     g.addColorStop(0.62, 'rgba(0,0,0,1)');
@@ -169,32 +196,41 @@
     ctx.drawImage(t, e.x - R, e.y - R);
   }
   function closeEye(ctx, en, e) {
-    const fur = sampleColour(en.data, e.x, e.y - e.r * 1.9, e.r * 0.45) || en.face.fur;
-    lidFill(ctx, e, fur, e.y, e.r * 1.3);
-    clonePatch(ctx, en.base, e, e.r * 2.15, e.r * 1.3);
-    const g = ctx.createLinearGradient(0, e.y - e.r, 0, e.y + e.r);
-    g.addColorStop(0, 'rgba(0,0,0,0)');
-    g.addColorStop(1, 'rgba(0,0,0,.14)');
-    ctx.fillStyle = g;
-    ctx.beginPath();
-    ctx.ellipse(e.x, e.y + e.r * 0.1, e.r * 1.05, e.r * 0.8, 0, 0, Math.PI * 2);
-    ctx.fill();
-    lash(ctx, e, false);
+    const f = en.face, r = e.r;
+    const above = { x: e.x - f.v.x * r * 2.15, y: e.y - f.v.y * r * 2.15 };
+    const fur = sampleColour(en.data, e.x - f.v.x * r * 1.9, e.y - f.v.y * r * 1.9, r * 0.45) || f.fur;
+    lidFill(ctx, e.x, e.y, fur, r * 1.3);
+    clonePatch(ctx, en.base, e, above, r * 1.3);
+    local(ctx, e, f.ang, () => {
+      const g = ctx.createLinearGradient(0, -r, 0, r);
+      g.addColorStop(0, 'rgba(0,0,0,0)');
+      g.addColorStop(1, 'rgba(0,0,0,.14)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.ellipse(0, r * 0.1, r * 1.05, r * 0.8, 0, 0, Math.PI * 2);
+      ctx.fill();
+      lash(ctx, r, false);
+    });
   }
   function squint(ctx, en, e) {
-    const fur = sampleColour(en.data, e.x, e.y + e.r * 1.9, e.r * 0.45) || en.face.fur;
+    const f = en.face, r = e.r;
+    const below = { x: e.x + f.v.x * r * 2.1, y: e.y + f.v.y * r * 2.1 };
+    const fur = sampleColour(en.data, e.x + f.v.x * r * 1.9, e.y + f.v.y * r * 1.9, r * 0.45) || f.fur;
     ctx.save();
+    ctx.translate(e.x, e.y);
+    ctx.rotate(f.ang);
     ctx.beginPath();
-    ctx.moveTo(e.x - e.r * 1.6, e.y + e.r * 0.3);
-    ctx.quadraticCurveTo(e.x, e.y - e.r * 0.75, e.x + e.r * 1.6, e.y + e.r * 0.3);
-    ctx.lineTo(e.x + e.r * 1.6, e.y + e.r * 1.8);
-    ctx.lineTo(e.x - e.r * 1.6, e.y + e.r * 1.8);
+    ctx.moveTo(-r * 1.6, r * 0.3);
+    ctx.quadraticCurveTo(0, -r * 0.75, r * 1.6, r * 0.3);
+    ctx.lineTo(r * 1.6, r * 1.8);
+    ctx.lineTo(-r * 1.6, r * 1.8);
     ctx.closePath();
     ctx.clip();
-    lidFill(ctx, e, fur, e.y + e.r * 0.25, e.r * 1.35);
-    clonePatch(ctx, en.base, e, -e.r * 2.1, e.r * 1.4);
+    ctx.setTransform(1, 0, 0, 1, 0, 0); // keep the clip, draw in image space
+    lidFill(ctx, e.x + f.v.x * r * 0.25, e.y + f.v.y * r * 0.25, fur, r * 1.35);
+    clonePatch(ctx, en.base, e, below, r * 1.4);
     ctx.restore();
-    lash(ctx, e, true);
+    local(ctx, e, f.ang, () => lash(ctx, r, true));
   }
   function magnify(ctx, src, e, k) {
     const R = e.r * 1.35, D = Math.ceil(R * 2 * k);
@@ -247,56 +283,56 @@
     ctx.fill();
     ctx.restore();
   }
-  function brows(ctx, eyes) {
+  function brows(ctx, eyes, ang) {
     ctx.save();
     ctx.strokeStyle = 'rgba(35,26,22,.7)';
     ctx.lineCap = 'round';
     eyes.forEach((e, i) => {
-      const dir = i === 0 ? 1 : -1; // inner end points to the middle and goes up
-      ctx.lineWidth = Math.max(2, e.r * 0.26);
-      ctx.beginPath();
-      ctx.moveTo(e.x - dir * e.r * 0.9, e.y - e.r * 1.35);
-      ctx.quadraticCurveTo(e.x, e.y - e.r * 1.55, e.x + dir * e.r * 0.85, e.y - e.r * 2.0);
-      ctx.stroke();
+      const dir = eyes.length === 1 ? 1 : i === 0 ? 1 : -1; // inner end points to the middle and goes up
+      local(ctx, e, ang, () => {
+        ctx.lineWidth = Math.max(2, e.r * 0.26);
+        ctx.beginPath();
+        ctx.moveTo(-dir * e.r * 0.9, -e.r * 1.35);
+        ctx.quadraticCurveTo(0, -e.r * 1.55, dir * e.r * 0.85, -e.r * 2.0);
+        ctx.stroke();
+      });
     });
     ctx.restore();
   }
 
   /* ---------- maneki accessories ---------- */
+  /* ---------- maneki accessories ---------- */
   function collar(ctx, f, colour) {
-    const { cx, neckY: y, d } = f;
-    const hw = d * 2.4, sag = d * 0.38, t = d * 0.2;
+    const d = f.d, hw = d * 2.4, sag = d * 0.38, t = d * 0.2;
     const band = () => {
       ctx.beginPath();
-      ctx.moveTo(cx - hw, y - sag);
-      ctx.quadraticCurveTo(cx, y + sag, cx + hw, y - sag);
-      ctx.lineTo(cx + hw, y - sag + t);
-      ctx.quadraticCurveTo(cx, y + sag + t, cx - hw, y - sag + t);
+      ctx.moveTo(-hw, -sag);
+      ctx.quadraticCurveTo(0, sag, hw, -sag);
+      ctx.lineTo(hw, -sag + t);
+      ctx.quadraticCurveTo(0, sag + t, -hw, -sag + t);
       ctx.closePath();
     };
+    const sh = root.Neko.util.shade;
     ctx.save();
+    ctx.translate(f.neck.x, f.neck.y);
+    ctx.rotate(f.ang);
     ctx.globalCompositeOperation = 'source-atop'; // only on the pet
-    ctx.translate(0, d * 0.07);
-    band(); ctx.fillStyle = 'rgba(0,0,0,.28)'; ctx.fill(); // shadow
-    ctx.translate(0, -d * 0.07);
-    const g = ctx.createLinearGradient(0, y - t, 0, y + t * 2);
-    g.addColorStop(0, root.Neko.util.shade(colour, 0.25));
-    g.addColorStop(0.5, colour);
-    g.addColorStop(1, root.Neko.util.shade(colour, -0.35));
+    ctx.save(); ctx.translate(0, d * 0.07); band(); ctx.fillStyle = 'rgba(0,0,0,.28)'; ctx.fill(); ctx.restore();
+    const g = ctx.createLinearGradient(0, -t, 0, t * 2);
+    g.addColorStop(0, sh(colour, 0.25)); g.addColorStop(0.5, colour); g.addColorStop(1, sh(colour, -0.35));
     band(); ctx.fillStyle = g; ctx.fill();
     ctx.lineWidth = Math.max(1, d * 0.03);
-    ctx.strokeStyle = root.Neko.util.shade(colour, -0.45);
+    ctx.strokeStyle = sh(colour, -0.45);
     ctx.stroke();
-    // stitching highlight
     ctx.setLineDash([d * 0.08, d * 0.07]);
     ctx.strokeStyle = 'rgba(255,255,255,.45)';
     ctx.beginPath();
-    ctx.moveTo(cx - hw, y - sag + t * 0.3);
-    ctx.quadraticCurveTo(cx, y + sag + t * 0.3, cx + hw, y - sag + t * 0.3);
+    ctx.moveTo(-hw, -sag + t * 0.3);
+    ctx.quadraticCurveTo(0, sag + t * 0.3, hw, -sag + t * 0.3);
     ctx.stroke();
     ctx.restore();
-    // bell hangs at the lowest point of the band
-    bell(ctx, cx, y + t + d * 0.12, d * 0.2);
+    const b = f.at(0, d * 1.2 + t + d * 0.12);
+    bell(ctx, b.x, b.y, d * 0.2);
   }
   function bell(ctx, x, y, r) {
     ctx.save();
@@ -343,22 +379,19 @@
     ctx.restore();
   }
   function partyHat(ctx, f, colours) {
-    const { cx, headTop, d } = f;
-    const base = headTop + d * 0.35, w = d * 0.62, hgt = d * 1.25, tilt = 0.18;
+    const d = f.d, base = f.at(d * 0.25, -d * 0.95), w = d * 0.62, hgt = d * 1.25, tilt = f.ang + 0.18;
+    const cone = () => { ctx.beginPath(); ctx.moveTo(-w, 0); ctx.lineTo(0, -hgt); ctx.lineTo(w, 0); ctx.quadraticCurveTo(0, d * 0.16, -w, 0); ctx.closePath(); };
     ctx.save();
-    ctx.translate(cx + d * 0.25, base);
+    ctx.translate(base.x, base.y);
     ctx.rotate(tilt);
     ctx.shadowColor = 'rgba(0,0,0,.25)'; ctx.shadowBlur = d * 0.1; ctx.shadowOffsetY = d * 0.04;
-    ctx.beginPath(); ctx.moveTo(-w, 0); ctx.lineTo(0, -hgt); ctx.lineTo(w, 0); ctx.quadraticCurveTo(0, d * 0.16, -w, 0); ctx.closePath();
-    ctx.fillStyle = colours[0]; ctx.fill();
+    cone(); ctx.fillStyle = colours[0]; ctx.fill();
     ctx.shadowColor = 'transparent';
-    ctx.clip();
-    ctx.fillStyle = colours[1];
-    for (let i = -3; i < 4; i++) { ctx.beginPath(); ctx.moveTo(-w * 2, -hgt * 0.1 + i * d * 0.34); ctx.lineTo(w * 2, -hgt * 0.45 + i * d * 0.34); ctx.lineTo(w * 2, -hgt * 0.35 + i * d * 0.34); ctx.lineTo(-w * 2, 0 + i * d * 0.34); ctx.fill(); }
-    ctx.restore();
     ctx.save();
-    ctx.translate(cx + d * 0.25, base);
-    ctx.rotate(tilt);
+    cone(); ctx.clip();
+    ctx.fillStyle = colours[1];
+    for (let i = -3; i < 4; i++) { ctx.beginPath(); ctx.moveTo(-w * 2, -hgt * 0.1 + i * d * 0.34); ctx.lineTo(w * 2, -hgt * 0.45 + i * d * 0.34); ctx.lineTo(w * 2, -hgt * 0.35 + i * d * 0.34); ctx.lineTo(-w * 2, i * d * 0.34); ctx.fill(); }
+    ctx.restore();
     ctx.fillStyle = '#FFFFFF';
     ctx.beginPath(); ctx.arc(0, -hgt, d * 0.16, 0, Math.PI * 2); ctx.fill();
     ctx.restore();
@@ -394,17 +427,17 @@
     x.drawImage(e.base, 0, 0);
     const eyes = f.eyes;
     if (eyes) {
+      const last = eyes[eyes.length - 1];
       if (state === 'sleepy') eyes.forEach((ey) => closeEye(x, e, ey));
-      else if (state === 'wink') { catchlight(x, eyes[0]); closeEye(x, e, eyes[1]); }
+      else if (state === 'wink') { if (eyes.length > 1) catchlight(x, eyes[0]); closeEye(x, e, last); }
       else if (state === 'happy' || state === 'party') eyes.forEach((ey) => squint(x, e, ey));
       else if (state === 'surprised') eyes.forEach((ey) => { magnify(x, e.base, ey, 1.3); catchlight(x, { x: ey.x, y: ey.y, r: ey.r * 1.3 }); });
-      else if (state === 'love') eyes.forEach((ey) => { heart(x, ey.x, ey.y, ey.r * 1.25, '#FF3B6B'); });
-      else if (state === 'rich') eyes.forEach((ey) => { star(x, ey.x - ey.r * 0.25, ey.y - ey.r * 0.3, ey.r * 0.75, '#FFE27A'); });
+      else if (state === 'love') eyes.forEach((ey) => heart(x, ey.x, ey.y, ey.r * 1.25, '#FF3B6B'));
+      else if (state === 'rich') eyes.forEach((ey) => star(x, ey.x - ey.r * 0.25, ey.y - ey.r * 0.3, ey.r * 0.75, '#FFE27A'));
       else eyes.forEach((ey) => catchlight(x, ey));
-      if (state === 'worried') brows(x, eyes);
+      if (state === 'worried') brows(x, eyes, f.ang);
     }
     grade(x, state);
-    // keep everything inside the silhouette
     x.globalCompositeOperation = 'destination-in';
     x.drawImage(e.base, 0, 0);
     x.globalCompositeOperation = 'source-over';
@@ -553,22 +586,36 @@
     return out;
   }
 
-  /* ---------- cache / public API ---------- */
-  const cache = new Map();
-  function keyOf(t) {
-    return [t.id, (t.cutout || t.sticker || '').length, JSON.stringify(t.face || null), t.collarOn === false ? 0 : 1, t.colors && t.colors.collar, t.ui && t.ui.primary, t.species].join('|');
+  /* ---------- templates: several photos of the same character ---------- */
+  function templatesOf(t) {
+    if (t.templates && t.templates.length) return t.templates;
+    const src = t.cutout || t.sticker; // themes made before multi-photo templates
+    return src ? [{ id: 'main', cutout: src, face: t.face }] : [];
+  }
+  function mainTemplate(t) {
+    const ts = templatesOf(t);
+    return ts.find((x) => x.id === t.mainId) || ts[0] || null;
+  }
+  function templateFor(t, state) {
+    const id = t.moodMap && t.moodMap[state];
+    return (id && templatesOf(t).find((x) => x.id === id)) || mainTemplate(t);
   }
 
-  function prepare(t) {
-    const k = keyOf(t);
+  /* ---------- cache / public API ---------- */
+  const cache = new Map();
+  function keyOf(t, tpl) {
+    return [t.id, tpl.id, (tpl.cutout || '').length, (tpl.cutout || '').slice(-24), JSON.stringify(tpl.face || null)].join('|');
+  }
+
+  function prepareTpl(t, tpl) {
+    const k = keyOf(t, tpl);
     let entry = cache.get(k);
     if (entry) return entry.ready;
     entry = { ok: false, urls: {}, theme: t };
     cache.set(k, entry);
     entry.ready = (async () => {
-      const src = t.cutout || t.sticker;
-      if (!src) return entry;
-      const img = await loadImg(src);
+      if (!tpl.cutout) return entry;
+      const img = await loadImg(tpl.cutout);
       const base = canvas(S);
       const bc = base.getContext('2d');
       bc.imageSmoothingQuality = 'high';
@@ -577,16 +624,23 @@
       try { data = bc.getImageData(0, 0, S, S).data; } catch (err) { return entry; } // tainted (file://)
       entry.base = base;
       entry.data = data;
-      entry.face = computeFace(data, t.face);
+      entry.face = computeFace(data, tpl.face);
       entry.ok = true;
       return entry;
     })().catch(() => entry);
     return entry.ready;
   }
 
-  function ready(t) {
-    const e = cache.get(keyOf(t));
+  function prepare(t) {
+    return Promise.all(templatesOf(t).map((tpl) => prepareTpl(t, tpl)));
+  }
+
+  function entryOf(t, tpl) {
+    const e = tpl && cache.get(keyOf(t, tpl));
     return e && e.ok ? e : null;
+  }
+  function ready(t) {
+    return entryOf(t, mainTemplate(t));
   }
 
   function toURL(c) {
@@ -595,11 +649,12 @@
 
   // kind: portrait | portrait-plain | sticker | icon | favicon
   function get(t, state, kind) {
-    const e = ready(t);
+    state = STATES[state] ? state : 'normal';
+    const whole = kind === 'icon' || kind === 'favicon';
+    const e = (!whole && entryOf(t, templateFor(t, state))) || ready(t);
     if (!e) return null;
     e.theme = t;
-    state = STATES[state] ? state : 'normal';
-    const k = state + '|' + kind;
+    const k = [state, kind, t.collarOn === false ? 0 : 1, t.colors && t.colors.collar, t.ui && t.ui.primary, t.species, !!t.builtin].join('|');
     if (!e.urls[k]) {
       let c;
       if (kind === 'sticker') c = renderSticker(e, state, (t.ui && t.ui.primary) || '#F2B632');
@@ -611,5 +666,5 @@
     return e.urls[k];
   }
 
-  root.Avatar = { STATES, emojiFor, prepare, ready, get, renderIcon, renderPortrait, renderSticker, SIZE: S };
+  root.Avatar = { STATES, emojiFor, prepare, ready, get, templatesOf, mainTemplate, templateFor, SIZE: S };
 })(window);

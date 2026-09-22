@@ -519,3 +519,50 @@ img, svg { max-width: 100%; }
 @keyframes glow { 0%, 100% { filter: drop-shadow(0 0 0 rgba(255, 200, 40, 0)); } 50% { filter: drop-shadow(0 0 10px rgba(255, 200, 40, 0.95)); } }
 @keyframes wiggle { 0%, 100% { transform: rotate(0); } 25% { transform: rotate(-4deg); } 75% { transform: rotate(4deg); } }
 @keyframes pop { 0% { transform: scale(0.88); } 60% { transform: scale(1.08); } 100% { transform: scale(1); } }
+
+/* ---------- multi-photo templates ---------- */
+.tpl-strip { display: flex; gap: 10px; overflow-x: auto; padding: 2px 2px 8px; scroll-snap-type: x proximity; }
+.tpl-card, .tpl-add {
+  flex: none; width: 118px; background: #fff; border-radius: 16px; box-shadow: var(--shadow);
+  padding: 6px; display: flex; flex-direction: column; gap: 4px; scroll-snap-align: start;
+}
+.tpl-card.sel { box-shadow: 0 0 0 3px var(--primary); }
+.tpl-pic { border: 0; padding: 0; background: repeating-conic-gradient(#f3f0ec 0 25%, #fff 0 50%) 0 0 / 14px 14px; border-radius: 12px; aspect-ratio: 1; overflow: hidden; }
+.tpl-pic img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.tpl-pic img:not([src]) { visibility: hidden; }
+.tpl-meta { display: flex; flex-direction: column; line-height: 1.2; font-size: 12.5px; }
+.tpl-meta small { color: var(--muted); font-size: 11px; }
+.tpl-actions { display: grid; grid-template-columns: repeat(4, 1fr); gap: 2px; }
+.tpl-actions button { border: 0; background: var(--primary-soft); border-radius: 8px; padding: 5px 0; font-size: 13px; }
+.tpl-actions button:disabled { opacity: 0.35; cursor: default; }
+.tpl-add { justify-content: center; align-items: center; border: 2px dashed color-mix(in srgb, var(--primary) 60%, #fff); color: var(--primary-dark); font-weight: 800; font-size: 13px; cursor: pointer; min-height: 170px; box-shadow: none; }
+.tpl-add span { font-size: 30px; line-height: 1; }
+.moods-title small { font-weight: 700; text-transform: none; letter-spacing: 0; }
+.mood-photo { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 10px 2px; font-size: 13px; }
+.mp-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip-btn { border: 2px solid var(--line); background: #fff; border-radius: 999px; padding: 3px 10px 3px 3px; display: inline-flex; align-items: center; gap: 4px; font-weight: 800; font-size: 12.5px; min-height: 34px; }
+.chip-btn:first-child { padding: 3px 12px; }
+.chip-btn img { width: 26px; height: 26px; }
+.chip-btn.on { border-color: var(--primary); background: var(--primary-soft); }
+.toggle.center { justify-content: center; margin: 4px 0 10px; }
+.studio-scan h3 { margin: 4px 0 0; }
+
+/* ---------- highlight tool ---------- */
+.hl-modes { margin: 8px 0 10px; }
+.hl-stage { display: flex; justify-content: center; background: #1f1a18; border-radius: 16px; padding: 8px; }
+.hl-canvas { display: block; touch-action: none; cursor: crosshair; border-radius: 10px; max-width: 100%; }
+.hl-brush { display: flex; align-items: center; gap: 10px; margin: 12px 4px 0; font-weight: 700; font-size: 14px; }
+.hl-brush input { flex: 1; accent-color: var(--primary); }
+
+/* ---------- eye editor ---------- */
+.ez-stage { position: relative; display: flex; justify-content: center; }
+.ez-canvas { display: block; touch-action: none; border-radius: 16px; box-shadow: var(--shadow); cursor: crosshair; }
+.ez-zoom { position: absolute; right: 10px; bottom: 10px; display: flex; align-items: center; gap: 4px; background: rgba(255, 255, 255, 0.92); border-radius: 999px; padding: 4px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.15); }
+.ez-zoom button { width: 36px; height: 36px; border: 0; border-radius: 50%; background: var(--primary-soft); font-size: 18px; font-weight: 800; }
+.ez-level { min-width: 38px; text-align: center; font-weight: 800; font-size: 13px; }
+.ez-which { margin: 12px 0 0; }
+.ez-preview { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 12px; }
+.ez-preview figure { margin: 0; text-align: center; }
+.ez-preview img { width: 100%; aspect-ratio: 1; }
+.ez-preview img:not([src]) { visibility: hidden; }
+.ez-preview figcaption { font-size: 16px; }
