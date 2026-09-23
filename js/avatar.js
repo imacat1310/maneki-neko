@@ -46,6 +46,31 @@
       i.src = src;
     });
   }
+  // A cut-out is either a dataURL, or {rgb, alpha} (JPEG pair, used where WebP can't be encoded).
+  async function loadCutout(src) {
+    if (!src) throw new Error('no cut-out');
+    if (typeof src === 'string') return loadImg(src);
+    const [rgb, alpha] = await Promise.all([loadImg(src.rgb), loadImg(src.alpha)]);
+    const c = canvas(S);
+    const x = c.getContext('2d');
+    x.drawImage(rgb, 0, 0, S, S);
+    const m = canvas(S);
+    const mc = m.getContext('2d');
+    mc.drawImage(alpha, 0, 0, S, S);
+    const md = mc.getImageData(0, 0, S, S).data;
+    const id = x.getImageData(0, 0, S, S);
+    for (let i = 0; i < S * S; i++) {
+      const a = md[i * 4];
+      id.data[i * 4 + 3] = a < 40 ? 0 : a > 215 ? 255 : a;
+    }
+    x.putImageData(id, 0, 0);
+    return c;
+  }
+  function cutKey(c) {
+    if (!c) return '0';
+    return typeof c === 'string' ? c.length + ':' + c.slice(-24) : 'p' + c.rgb.length + ':' + c.alpha.length;
+  }
+
   function rgba(hex, a) {
     const [r, g, b] = root.Neko.util.hexToRgb(hex);
     return `rgba(${r},${g},${b},${a})`;
@@ -604,7 +629,7 @@
   /* ---------- cache / public API ---------- */
   const cache = new Map();
   function keyOf(t, tpl) {
-    return [t.id, tpl.id, (tpl.cutout || '').length, (tpl.cutout || '').slice(-24), JSON.stringify(tpl.face || null)].join('|');
+    return [t.id, tpl.id, cutKey(tpl.cutout), JSON.stringify(tpl.face || null)].join('|');
   }
 
   function prepareTpl(t, tpl) {
@@ -613,9 +638,15 @@
     if (entry) return entry.ready;
     entry = { ok: false, urls: {}, theme: t };
     cache.set(k, entry);
+    // keep memory small on phones: drop the least recently added entries
+    while (cache.size > 10) {
+      const oldest = cache.keys().next().value;
+      if (oldest === k) break;
+      cache.delete(oldest);
+    }
     entry.ready = (async () => {
       if (!tpl.cutout) return entry;
-      const img = await loadImg(tpl.cutout);
+      const img = await loadCutout(tpl.cutout);
       const base = canvas(S);
       const bc = base.getContext('2d');
       bc.imageSmoothingQuality = 'high';
@@ -666,5 +697,5 @@
     return e.urls[k];
   }
 
-  root.Avatar = { STATES, emojiFor, prepare, ready, get, templatesOf, mainTemplate, templateFor, SIZE: S };
+  root.Avatar = { STATES, emojiFor, prepare, ready, get, templatesOf, mainTemplate, templateFor, loadCutout, SIZE: S };
 })(window);

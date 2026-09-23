@@ -50,6 +50,19 @@ Account → **Add your pet** → choose **one or more photos** (up to 6) of the 
 
 The AI parts download once (~6 MB model + ~12 MB runtime) and are cached for offline use. Photos never leave your device.
 
+## On iPhone
+
+Installed from Safari (**Share → Add to Home Screen**) it behaves like a native app:
+
+- **Launch screens** for every current iPhone size, so there's no white flash while it starts.
+- **Dark mode** follows the iPhone's appearance setting.
+- **No zoom surprises**: 16px form fields (iOS zooms into anything smaller), no double-tap zoom, no pull-to-refresh bounce, no long-press callouts, and tap targets of at least 44px.
+- **Safe areas** for the notch/Dynamic Island and the home indicator; sheets rise above the keyboard and scroll the focused field into view.
+- **Pinch-to-zoom** inside the eye editor and highlight canvas without zooming the page.
+- **Storage-friendly**: transactions and pet photos are stored separately, so everyday edits don't rewrite megabytes. Where Safari can't encode WebP, cut-outs are stored as a JPEG colour layer plus a small alpha mask instead of a large PNG. Photos kept for re-scans are 520px.
+- **Lighter on memory and battery**: the avatar cache is capped, off-screen day cards are skipped while scrolling, search is debounced and capped at 150 results, and the "lucky" glow animation avoids expensive filters.
+- Everything works offline after the first visit; the AI models (~18 MB) download on the first scan and are then cached.
+
 ## Files
 
 ```

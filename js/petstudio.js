@@ -732,6 +732,42 @@
 
   /* ---------- cut-out (hi-res, transparent) ---------- */
   const CUT = 400, CUT_MARGIN = 30;
+
+  // Safari on older iOS can't encode WebP; a PNG cut-out would eat the 5 MB storage budget,
+  // so fall back to a JPEG colour layer + a small JPEG alpha mask.
+  const webpOK = (() => {
+    try {
+      const c = document.createElement('canvas');
+      c.width = c.height = 1;
+      return c.toDataURL('image/webp').indexOf('data:image/webp') === 0;
+    } catch (e) { return false; }
+  })();
+
+  function encodeCutout(out) {
+    if (webpOK) {
+      const u = out.toDataURL('image/webp', 0.9);
+      if (u.indexOf('data:image/webp') === 0) return u;
+    }
+    const W = out.width, H = out.height;
+    const id = out.getContext('2d').getImageData(0, 0, W, H);
+    const rgbC = document.createElement('canvas');
+    rgbC.width = W; rgbC.height = H;
+    const rc = rgbC.getContext('2d');
+    rc.fillStyle = '#808080';
+    rc.fillRect(0, 0, W, H);
+    rc.drawImage(out, 0, 0);
+    const mC = document.createElement('canvas');
+    mC.width = W; mC.height = H;
+    const mc = mC.getContext('2d');
+    const mid = mc.createImageData(W, H);
+    for (let i = 0; i < W * H; i++) {
+      const a = id.data[i * 4 + 3];
+      mid.data[i * 4] = mid.data[i * 4 + 1] = mid.data[i * 4 + 2] = a;
+      mid.data[i * 4 + 3] = 255;
+    }
+    mc.putImageData(mid, 0, 0);
+    return { rgb: rgbC.toDataURL('image/jpeg', 0.86), alpha: mC.toDataURL('image/jpeg', 0.8) };
+  }
   function makeCutout(img, canvas, mask, box) {
     const W = canvas.width, H = canvas.height;
     const mc = document.createElement('canvas');
@@ -763,9 +799,7 @@
     o.imageSmoothingQuality = 'high';
     o.drawImage(hi, sx * k, sy * k, side * k, side * k, CUT_MARGIN, CUT_MARGIN, CUT - CUT_MARGIN * 2, CUT - CUT_MARGIN * 2);
     const map = (x, y) => [CUT_MARGIN + (x - sx) * scale, CUT_MARGIN + (y - sy) * scale];
-    let url = out.toDataURL('image/webp', 0.9);
-    if (!url.startsWith('data:image/webp')) url = out.toDataURL('image/png');
-    return { url, map, scale };
+    return { url: encodeCutout(out), map, scale };
   }
 
   function overlay(canvas, mask, box, eyes) {
@@ -796,12 +830,12 @@
     return c.toDataURL('image/jpeg', 0.85);
   }
 
-  function thumb(canvas, size) {
+  function thumb(canvas, size, q) {
     const s = Math.min(1, size / Math.max(canvas.width, canvas.height));
     const c = document.createElement('canvas');
     c.width = Math.round(canvas.width * s); c.height = Math.round(canvas.height * s);
     c.getContext('2d').drawImage(canvas, 0, 0, c.width, c.height);
-    return c.toDataURL('image/jpeg', 0.82);
+    return c.toDataURL('image/jpeg', q || 0.78);
   }
 
   const tick = () => new Promise((r) => setTimeout(r, 30));
@@ -948,7 +982,7 @@
       cutout: cut.url,
       face,
       region: region || null,
-      photo: thumb(toCanvas(img, 640), 640),
+      photo: thumb(toCanvas(img, 520), 520), // kept for re-scans; small enough for phone storage
       thumb: thumb(canvas, 200),
       overlay: overlay(canvas, mask, tight, eyes),
       box: tight,
@@ -956,5 +990,5 @@
     };
   }
 
-  root.PetStudio = { analyze, deriveUI, mergePalettes, themeFrom, loadDetector, loadSegmenter, hexHsl, hslHex };
+  root.PetStudio = { analyze, encodeCutout, webpOK, deriveUI, mergePalettes, themeFrom, loadDetector, loadSegmenter, hexHsl, hslHex };
 })(window);

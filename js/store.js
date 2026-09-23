@@ -3,6 +3,7 @@
   'use strict';
 
   const KEY = 'maneki-neko-v1';
+  const TKEY = 'maneki-neko-themes-v1'; // pet photos live apart, so everyday edits stay cheap to save
 
   // [id, name, icon, type, colour]; type: expense | income | debt_in | debt_out | xfer_in | xfer_out
   const DEFAULT_CATEGORIES = [
@@ -82,7 +83,8 @@
         s.settings = Object.assign(b.settings, s.settings);
         // make sure newer built-in categories exist
         for (const c of b.categories) if (!s.categories.find((x) => x.id === c.id)) s.categories.push(c);
-        s.themes = s.themes || [];
+        const t = localStorage.getItem(TKEY);
+        s.themes = t ? JSON.parse(t) : s.themes || [];
         s.budgets = s.budgets || [];
         return s;
       }
@@ -92,13 +94,20 @@
     return blank();
   }
 
-  function save() {
+  let themesSaved = false;
+  function save(themesChanged) {
     try {
-      localStorage.setItem(KEY, JSON.stringify(state));
+      const data = {};
+      for (const k in state) if (k !== 'themes') data[k] = state[k];
+      localStorage.setItem(KEY, JSON.stringify(data));
+      if (themesChanged || !themesSaved) {
+        localStorage.setItem(TKEY, JSON.stringify(state.themes));
+        themesSaved = true;
+      }
       return true;
     } catch (e) {
       console.error(e);
-      root.dispatchEvent && root.dispatchEvent(new CustomEvent('store-error', { detail: 'Storage is full — try removing a pet theme or exporting your data.' }));
+      root.dispatchEvent && root.dispatchEvent(new CustomEvent('store-error', { detail: 'Storage is full — remove a pet photo or export your data.' }));
       return false;
     }
   }
@@ -213,12 +222,12 @@
   function upsert(list, item) {
     const i = state[list].findIndex((x) => x.id === item.id);
     if (i >= 0) state[list][i] = item; else state[list].push(item);
-    save();
+    save(list === 'themes');
     return item;
   }
   function remove(list, id) {
     state[list] = state[list].filter((x) => x.id !== id);
-    save();
+    save(list === 'themes');
   }
 
   function addTransfer(from, to, amount, date, note) {
@@ -288,14 +297,14 @@
     const themes = state.themes;
     state = blank();
     state.themes = themes;
-    save();
+    save(true);
   }
 
   function replace(data) {
     const b = blank();
     if (!data || !Array.isArray(data.transactions) || !Array.isArray(data.wallets)) throw new Error('Not a Maneki-Neko backup file');
     state = Object.assign(b, data, { settings: Object.assign(b.settings, data.settings || {}) });
-    save();
+    save(true);
   }
 
   function toCSV() {

@@ -272,8 +272,10 @@
   function viewTx() {
     const w = S.state.settings.wallet;
     let list, head = '';
+    let capped = 0;
     if (ui.q) {
       list = S.txs({ q: ui.q });
+      if (list.length > 150) { capped = list.length; list = list.slice(-150); }
     } else {
       const p = S.period(ui.offset);
       list = S.txs({ start: p.start, end: p.end });
@@ -324,7 +326,7 @@
           ${g.items.slice().sort((a, b) => b.date.localeCompare(a.date)).map((t) => txRow(t, true)).join('')}
         </section>`).join('');
     }
-    return search + (ui.q ? `<p class="muted pad">${list.length} result${list.length > 1 ? 's' : ''} for “${esc(ui.q)}”</p>` : monthTabs()) + head + body;
+    return search + (ui.q ? `<p class="muted pad">${capped ? `newest 150 of ${capped}` : list.length + ' result' + (list.length > 1 ? 's' : '')} for “${esc(ui.q)}”</p>` : monthTabs()) + head + body;
   }
 
   /* ================= report view ================= */
@@ -534,12 +536,16 @@
     const q = $('#q');
     if (q) {
       q.oninput = () => {
-        ui.q = q.value.trim();
-        const pos = q.selectionStart;
-        render();
-        const nq = $('#q');
-        nq.focus();
-        nq.setSelectionRange(pos, pos);
+        clearTimeout(q._t);
+        q._t = setTimeout(() => {
+          ui.q = q.value.trim();
+          const pos = q.selectionStart;
+          render();
+          const nq = $('#q');
+          if (!nq) return;
+          nq.focus();
+          nq.setSelectionRange(pos, pos);
+        }, 220);
       };
     }
     const nm = $('#set-name');
@@ -1236,8 +1242,7 @@
           $('[data-size]', sheet).oninput = (e) => { if (eyes[active]) { eyes[active].r = +e.target.value; draw(); preview(); } };
           $('[data-one]', sheet).onchange = (e) => { one = e.target.checked; active = 0; draw(); preview(); };
 
-          const im = new Image();
-          im.onload = () => {
+          Avatar.loadCutout(tpl.cutout).then((im) => {
             img = im;
             css = Math.min($('.ez-stage', sheet).clientWidth || 360, 520);
             cv.style.width = cv.style.height = css + 'px';
@@ -1248,8 +1253,7 @@
               zoom = 2.2; vx = cx - N0 / zoom / 2; vy = cy - N0 / zoom / 2; clampView();
             }
             draw(); preview();
-          };
-          im.src = tpl.cutout;
+          }).catch(() => toast('Could not open this photo', 'worried'));
         },
       });
     });
@@ -1452,9 +1456,11 @@
         mainId: d.mainId, moodMap: d.moodMap, colorsTouched: !!d.colorsTouched, uiTouched: !!d.uiTouched,
         createdAt: d.createdAt || Date.now(),
       };
+      const size = JSON.stringify(saved).length;
       S.upsert('themes', saved);
       S.state.settings.theme = saved.id;
       if (!S.save()) return;
+      if (size > 1400000) setTimeout(() => toast('Lots of photos saved — remove one if storage gets tight', 'surprised'), 2600);
       await Avatar.prepare(saved);
       close(); render();
       coinRain();
@@ -1567,6 +1573,43 @@
     if (el && actions[el.dataset.action]) actions[el.dataset.action](el);
   });
 
+  // iOS keyboard: keep the focused field in view and pad sheets by the keyboard height
+  document.addEventListener('focusin', (e) => {
+    const el = e.target;
+    if (!el.matches || !el.matches('input, select, textarea') || !el.closest('.sheet')) return;
+    setTimeout(() => el.scrollIntoView({ block: 'center', behavior: 'smooth' }), 320);
+  });
+  if (window.visualViewport) {
+    const vv = window.visualViewport;
+    const upd = () => document.documentElement.style.setProperty('--kb', Math.max(0, window.innerHeight - vv.height - vv.offsetTop) + 'px');
+    vv.addEventListener('resize', upd);
+    vv.addEventListener('scroll', upd);
+    upd();
+  }
+
+  // Safari pinch-zooms the page over canvases unless these are cancelled
+  ['gesturestart', 'gesturechange', 'gestureend'].forEach((evt) => {
+    document.addEventListener(evt, (e) => { if (e.target.closest && e.target.closest('.ez-canvas, .hl-canvas')) e.preventDefault(); }, { passive: false });
+  });
+
+  // One-off hint on iPhone Safari: how to install the app
+  function installHint() {
+    const standalone = window.navigator.standalone || matchMedia('(display-mode: standalone)').matches;
+    const iOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
+    if (standalone || !iOS || !location.protocol.startsWith('http')) return;
+    try { if (localStorage.getItem('maneki-install-tip') === 'off') return; } catch (e) { return; }
+    const el = document.createElement('div');
+    el.id = 'install-tip';
+    el.innerHTML = `<span class="tip-av">${avatar('wink')}</span>
+      <p>Install me on your Home Screen: tap <b>Share</b> <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3v12M8 7l4-4 4 4"/><path d="M5 13v7h14v-7"/></g></svg> then <b>Add to Home Screen</b></p>
+      <button aria-label="Dismiss">✕</button>`;
+    document.body.appendChild(el);
+    $('button', el).onclick = () => {
+      try { localStorage.setItem('maneki-install-tip', 'off'); } catch (e) { /* private mode */ }
+      el.remove();
+    };
+  }
+
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       const sheets = $$('.sheet-wrap.open .sheet');
@@ -1595,5 +1638,6 @@
     render();
     Promise.all(themes().map((t) => Avatar.prepare(t))).then(() => { if (ui.view === 'account') render(); });
     if (!S.state.settings.onboarded) setTimeout(onboarding, 300);
+    else setTimeout(installHint, 1200);
   });
 })();
